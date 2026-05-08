@@ -6,12 +6,15 @@
   "scripts": {
     "smoke:llm": "bun run src/scripts/smoke-llm.ts",
     "smoke:opencode": "bun run src/scripts/smoke-opencode.ts",
+    "smoke:validate": "bun run src/scripts/smoke-validate.ts",
     "smoke:generate": "bun run src/scripts/smoke-generate.ts",
     "once": "bun run src/main.ts --once",
     "start": "bun run src/main.ts",
     "typecheck": "bun run tsc --noEmit"
   },
   "dependencies": {
+    "node-html-parser": "^6.1.13",
+    "playwright-core": "^1.48.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
