@@ -1,0 +1,23 @@
+[Unit]
+Description=Slop Factory — autonomous LLM game producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=test
+Group=test
+WorkingDirectory=/home/test/slop-factory
+Environment=PATH=/home/test/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/test/.bun/bin/bun run src/main.ts
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Soft resource caps so a runaway tick can't drag the box down
+MemoryHigh=4G
+MemoryMax=8G
+
+[Install]
+WantedBy=multi-user.target
