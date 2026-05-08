@@ -1,0 +1,100 @@
+# Slop Factory — Game Contract
+
+You are creating a small standalone browser game for the Slop Factory gallery. Your output is published unedited.
+
+## Working directory
+
+You are running in an isolated working directory. You may read and write files here. You will be given the game concept in the prompt itself. Do **not** modify this `CONVENTIONS.md` file.
+
+## Required output files
+
+Produce both of these files in the working directory:
+
+1. **`index.html`** — a single self-contained HTML page that is the game.
+2. **`meta.json`** — metadata describing the game, used by the gallery.
+
+You may write scratch files for your own use; only the two above are published.
+
+## `meta.json` schema
+
+```json
+{
+  "title": "Neon Dodger",
+  "description": "Dodge falling neon blocks in a tiny ship. Stay alive as long as you can.",
+  "controls": ["Arrow keys to move", "Space to fire"],
+  "tags": ["arcade", "dodge"]
+}
+```
+
+Rules:
+- `title` — string, 3–80 characters, matches the game's display name.
+- `description` — string, 20–400 characters, one short paragraph.
+- `controls` — non-empty array of short strings, one per control.
+- `tags` — optional array of lowercase keywords.
+
+## `index.html` requirements
+
+### Self-contained
+- All CSS goes in a single `<style>` block in `<head>`.
+- All JS goes in a single `<script>` block at the end of `<body>`.
+- **No** external resources: no `<script src="https://...">`, no `<link href="https://...">`, no `<img src="https://...">`, no CDN imports.
+- **No** network calls at runtime: no `fetch`, no `XMLHttpRequest`, no `import()`, no `WebSocket`.
+
+### Required structure (in this order)
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>YOUR TITLE</title>
+  <style>/* inline only */</style>
+</head>
+<body>
+  <header class="game-header">
+    <h1>YOUR TITLE</h1>
+    <p class="game-description">YOUR DESCRIPTION</p>
+    <ul class="game-controls">
+      <li>YOUR CONTROL</li>
+    </ul>
+  </header>
+  <main>
+    <canvas id="game" width="800" height="600"></canvas>
+  </main>
+  <script>/* inline only */</script>
+</body>
+</html>
+```
+
+- Exactly one `<canvas id="game">` (you may set width/height to other values; 800x600 is recommended).
+- The `<header>`'s `<h1>` text must match `meta.json.title` exactly.
+- The `<p class="game-description">` text must match `meta.json.description` exactly.
+- The `<li>` items in `<ul class="game-controls">` must match `meta.json.controls` in order.
+
+### Behavior
+- The game must start rendering immediately on page load (no "click to start" required).
+- Use keyboard and/or mouse input.
+- The script must not throw any uncaught exception in the first 5 seconds.
+- If you use `localStorage` or `sessionStorage`, all keys must start with the prefix `slop-factory:{SLUG}:`.
+
+### Style
+- Dark background (the gallery is dark — recommend `#0a0a0f` or similar).
+- High-contrast neon accents (e.g. cyan `#7df9ff`, magenta `#ff00aa`, yellow `#ffd23f`).
+- The `<header>` is shown above the canvas — keep its styling minimal and let the canvas content shine.
+
+## What the validator checks
+
+Your output is checked programmatically. Failure feeds the error report back to you for correction.
+
+1. Both `index.html` and `meta.json` exist.
+2. `meta.json` parses as JSON and matches the schema above.
+3. `index.html` parses, has exactly one `<canvas id="game">`, and the `<header>` text matches `meta.json`.
+4. No external URLs in `<script src=>`, `<link href=>`, `<img src=>` (regex scan).
+5. Headless Chromium loads the page; no `console.error` or `pageerror` events in 5 seconds.
+6. Canvas has non-blank pixels after 3 seconds (game is actually drawing something).
+
+## Tips
+
+- Keep the implementation simple and robust over flashy and fragile.
+- Test mentally: imagine loading the page, pressing keys, watching for 5 seconds — would anything throw?
+- Use `requestAnimationFrame` for the loop. Wrap the loop body in a try/catch so a stray bug doesn't crash the whole thing.

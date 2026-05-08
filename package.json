@@ -1,0 +1,21 @@
+{
+  "name": "slop-factory",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke:llm": "bun run src/scripts/smoke-llm.ts",
+    "smoke:opencode": "bun run src/scripts/smoke-opencode.ts",
+    "smoke:generate": "bun run src/scripts/smoke-generate.ts",
+    "once": "bun run src/main.ts --once",
+    "start": "bun run src/main.ts",
+    "typecheck": "bun run tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.10",
+    "typescript": "^5.6.0"
+  }
+}

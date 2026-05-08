@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+*.log
+dist/
+.DS_Store
+PLAN.md
+
+
+# Per-game sandboxes live under /tmp; this is just a safety net
+work/
