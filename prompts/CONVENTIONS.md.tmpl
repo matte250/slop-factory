@@ -82,6 +82,19 @@ Rules:
 - High-contrast neon accents (e.g. cyan `#7df9ff`, magenta `#ff00aa`, yellow `#ffd23f`).
 - The `<header>` is shown above the canvas — keep its styling minimal and let the canvas content shine.
 
+## What makes a tiny canvas game feel good
+
+Aim for these qualities in every game you produce:
+
+1. **Immediate input response** — every keystroke or click produces visible action within one frame. Never make the player wait.
+2. **Clear feedback** — the player always knows when something happened. Use color flashes, particles, brief screen shake, score popups, or sound on every meaningful event (hit, score, miss, death).
+3. **Win/lose state** — the game has a clear end condition. On lose, draw "Game Over" + final score + restart instructions on the canvas. On win, celebrate (color burst, "You Win!" overlay).
+4. **Restart without page reload** — pressing R (or clicking) resets state cleanly. Mention this in `controls`.
+5. **Progressive difficulty** — start gentle so the player can learn, then ramp up. Don't dump them into chaos at t=0.
+6. **No dead time** — something interesting on screen at all times. Idle background animation (stars, gradient pulse, particles) is fine.
+7. **Persistent score / progress UI** — drawn on the canvas at the top corner, always visible.
+8. **Audio (optional but encouraged)** — generate tones with `OscillatorNode` (no external assets). **Do not auto-start audio on page load** — browsers block this and it will throw. Initialize the `AudioContext` lazily on the first keypress or click. Wrap audio code in try/catch.
+
 ## What the validator checks
 
 Your output is checked programmatically. Failure feeds the error report back to you for correction.

@@ -9,6 +9,11 @@ const Schema = z.object({
   OPENCODE_MODEL: z.string().min(1),
   OPENCODE_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
 
+  // 1 = implement only (~2 min), 2 = +critique pass, 3 = +polish pass (~7-10 min)
+  REFINE_STAGES: z.coerce.number().int().min(1).max(5).default(3),
+  // Per-stage retry budget when validation fails
+  STAGE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+
   GAMES_REPO_PATH: z.string().min(1),
   GAMES_REPO_REMOTE: z.string().url(),
   GAMES_PAGES_BASE_URL: z.string().url(),

@@ -6,7 +6,8 @@ export type NotifyInput = {
   meta: GameMeta;
   liveUrl: string;
   thumbnailUrl: string;
-  attempts: number;
+  shippedAfterStage: number;
+  totalStages: number;
   durationMs: number;
 };
 
@@ -29,7 +30,7 @@ export async function notifyDiscord(input: NotifyInput): Promise<void> {
           },
         ],
         footer: {
-          text: `attempt ${input.attempts} · ${(input.durationMs / 1000).toFixed(1)}s · ${cfg.OPENCODE_MODEL}`,
+          text: `stage ${input.shippedAfterStage}/${input.totalStages} · ${(input.durationMs / 1000).toFixed(1)}s · ${cfg.OPENCODE_MODEL}`,
         },
         timestamp: new Date().toISOString(),
       },

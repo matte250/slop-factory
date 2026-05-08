@@ -17,7 +17,7 @@ export async function runOnce(): Promise<TickResult> {
     const idea = await ideate();
     log.info("tick: idea picked", { slug: idea.slug, title: idea.title });
 
-    const gen = await generateGame(idea, { maxAttempts: 3 });
+    const gen = await generateGame(idea);
     if (!gen.ok) {
       log.error("tick: generate failed (sandbox preserved for inspection)", {
         slug: idea.slug,
@@ -46,12 +46,18 @@ export async function runOnce(): Promise<TickResult> {
       meta: gen.meta,
       liveUrl: pub.liveUrl,
       thumbnailUrl: pub.thumbnailUrl,
-      attempts: gen.attempts,
+      shippedAfterStage: gen.shippedAfterStage,
+      totalStages: gen.totalStages,
       durationMs: totalMs,
     });
 
     await gen.sandbox.cleanup();
-    log.info("tick: success", { slug: idea.slug, durationMs: totalMs, attempts: gen.attempts });
+    log.info("tick: success", {
+      slug: idea.slug,
+      durationMs: totalMs,
+      shippedAfterStage: gen.shippedAfterStage,
+      totalStages: gen.totalStages,
+    });
     return { ok: true, slug: idea.slug, durationMs: totalMs };
   } catch (err) {
     const e = err as Error;
