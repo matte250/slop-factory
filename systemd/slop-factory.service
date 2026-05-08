@@ -8,7 +8,7 @@ Type=simple
 User=test
 Group=test
 WorkingDirectory=/home/test/slop-factory
-Environment=PATH=/home/test/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/home/test/.bun/bin:/home/test/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/test/.bun/bin/bun run src/main.ts
 Restart=on-failure
 RestartSec=30
