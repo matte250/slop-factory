@@ -8,6 +8,8 @@
     "smoke:opencode": "bun run src/scripts/smoke-opencode.ts",
     "smoke:validate": "bun run src/scripts/smoke-validate.ts",
     "smoke:generate": "bun run src/scripts/smoke-generate.ts",
+    "smoke:publish": "bun run src/scripts/smoke-publish.ts",
+    "bootstrap:site": "bun run src/scripts/bootstrap-site.ts",
     "once": "bun run src/main.ts --once",
     "start": "bun run src/main.ts",
     "typecheck": "bun run tsc --noEmit"
