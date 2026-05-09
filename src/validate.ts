@@ -123,8 +123,160 @@ export type BrowserCheckOptions = {
   watchMs?: number;
 };
 
+const PLAYTEST_KEYS = [
+  "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+  "Space", "KeyW", "KeyA", "KeyS", "KeyD",
+];
+
+const PLAY_DURATION_MS = 8_000;
+const POLL_INTERVAL_MS = 250;
+const VISIBLE_THRESHOLD = 0.95;
+const VALID_STATES = new Set(["menu", "playing", "gameover"]);
+
+type ObservedState = {
+  present: boolean;
+  state?: unknown;
+  score?: unknown;
+  player?: { x?: unknown; y?: unknown; visible?: unknown };
+  objective?: unknown;
+};
+
+async function readGameState(page: import("playwright-core").Page): Promise<ObservedState> {
+  return await withDeadline(
+    "validate.browser.readState",
+    5_000,
+    page.evaluate(() => {
+      const g = (window as unknown as { __game?: Record<string, unknown> }).__game;
+      if (!g || typeof g !== "object") return { present: false };
+      const p = g.player as Record<string, unknown> | undefined;
+      return {
+        present: true,
+        state: g.state,
+        score: g.score,
+        player: p
+          ? { x: p.x, y: p.y, visible: p.visible }
+          : undefined,
+        objective: g.objective,
+      };
+    }),
+  );
+}
+
+function checkInitialContract(s: ObservedState, errors: string[]): boolean {
+  if (!s.present) {
+    errors.push(
+      'playtest: window.__game is not exposed. Required shape: { state: "menu"|"playing"|"gameover", score: number, player: { x: number, y: number, visible: boolean }, objective: string }. Set this on the very first frame, before any input.',
+    );
+    return false;
+  }
+  let ok = true;
+  if (typeof s.state !== "string" || !VALID_STATES.has(s.state)) {
+    errors.push(`playtest: window.__game.state is ${JSON.stringify(s.state)}; must be exactly "menu", "playing", or "gameover"`);
+    ok = false;
+  }
+  if (typeof s.score !== "number" || !Number.isFinite(s.score)) {
+    errors.push(`playtest: window.__game.score is ${JSON.stringify(s.score)}; must be a finite number`);
+    ok = false;
+  }
+  if (!s.player || typeof s.player !== "object") {
+    errors.push("playtest: window.__game.player is missing; must be { x: number, y: number, visible: boolean }");
+    ok = false;
+  } else {
+    if (typeof s.player.x !== "number" || !Number.isFinite(s.player.x)) {
+      errors.push(`playtest: window.__game.player.x is ${JSON.stringify(s.player.x)}; must be a finite number`);
+      ok = false;
+    }
+    if (typeof s.player.y !== "number" || !Number.isFinite(s.player.y)) {
+      errors.push(`playtest: window.__game.player.y is ${JSON.stringify(s.player.y)}; must be a finite number`);
+      ok = false;
+    }
+    if (typeof s.player.visible !== "boolean") {
+      errors.push(`playtest: window.__game.player.visible is ${JSON.stringify(s.player.visible)}; must be a boolean`);
+      ok = false;
+    }
+  }
+  if (typeof s.objective !== "string" || s.objective.length < 10 || s.objective.length > 200) {
+    errors.push(`playtest: window.__game.objective must be a 10-200 char single-sentence string describing what the player is trying to do; got ${JSON.stringify(s.objective)}`);
+    ok = false;
+  }
+  return ok;
+}
+
+async function runPlaytest(page: import("playwright-core").Page, errors: string[]): Promise<void> {
+  const initial = await readGameState(page);
+  if (!checkInitialContract(initial, errors)) return;
+
+  let invisibleFrames = 0;
+  let totalFrames = 0;
+  let scoreChanges = 0;
+  let lastScore = initial.score as number;
+  let reachedGameOver = (initial.state as string) === "gameover";
+  const seenStates = new Set<string>([initial.state as string]);
+  const invalidStates = new Set<string>();
+  let keyIdx = 0;
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < PLAY_DURATION_MS) {
+    const key = PLAYTEST_KEYS[keyIdx % PLAYTEST_KEYS.length]!;
+    keyIdx++;
+    try {
+      await page.keyboard.press(key);
+    } catch {
+      // page may have navigated/crashed — caught by next read
+    }
+    await page.waitForTimeout(POLL_INTERVAL_MS);
+
+    let s: ObservedState;
+    try {
+      s = await readGameState(page);
+    } catch (e) {
+      errors.push(`playtest: failed to read window.__game during play (${(e as Error).message}). Likely a runtime error or wedged JS thread.`);
+      return;
+    }
+
+    if (!s.present) {
+      errors.push("playtest: window.__game disappeared during play. It must remain set for the lifetime of the page.");
+      return;
+    }
+    totalFrames++;
+    if (s.player && s.player.visible === false) invisibleFrames++;
+    if (typeof s.score === "number" && Number.isFinite(s.score) && s.score !== lastScore) {
+      scoreChanges++;
+      lastScore = s.score;
+    }
+    if (typeof s.state === "string") {
+      seenStates.add(s.state);
+      if (s.state === "gameover") reachedGameOver = true;
+      if (!VALID_STATES.has(s.state)) invalidStates.add(s.state);
+    }
+  }
+
+  if (invalidStates.size > 0) {
+    errors.push(
+      `playtest: window.__game.state took invalid value(s) during play: ${[...invalidStates].map((s) => JSON.stringify(s)).join(", ")}. Allowed: "menu", "playing", "gameover".`,
+    );
+  }
+
+  if (totalFrames > 0) {
+    const visibleFrac = 1 - invisibleFrames / totalFrames;
+    if (visibleFrac < VISIBLE_THRESHOLD) {
+      errors.push(
+        `playtest: player was off-screen for ${invisibleFrames}/${totalFrames} polled frames (${Math.round((1 - visibleFrac) * 100)}%). player.visible must be true for at least ${Math.round(VISIBLE_THRESHOLD * 100)}% of frames during play. If your camera follows the player, the camera math must keep the player inside the canvas viewport.`,
+      );
+    }
+  }
+
+  if (scoreChanges === 0 && !reachedGameOver) {
+    errors.push(
+      `playtest: in ${PLAY_DURATION_MS / 1000}s of synthetic input (arrow keys, WASD, space), score never changed AND state never reached "gameover". The game has no progress signal — either input doesn't affect the world, or scoring is never wired up. Verify that pressing controls actually moves/scores/dies.`,
+    );
+  }
+}
+
 export async function browserChecks(opts: BrowserCheckOptions): Promise<ValidationResult> {
-  const watchMs = opts.watchMs ?? 5_000;
+  // watchMs is the post-load init window before playtest begins. Kept short
+  // because the playtest itself watches for ~8s on top.
+  const watchMs = opts.watchMs ?? 2_000;
   const errors: string[] = [];
 
   const { chromium } = await import("playwright-core");
@@ -140,7 +292,7 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
     // sync loop, wedged WebAudio init, etc.) won't be cancelled by this
     // racing — but the finally below force-closes the browser, killing any
     // stuck script.
-    return await withDeadline("validate.browser", 30_000, (async (): Promise<ValidationResult> => {
+    return await withDeadline("validate.browser", 45_000, (async (): Promise<ValidationResult> => {
       const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
@@ -160,8 +312,8 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
         return { ok: false, errors };
       }
 
-      // Wait the watch window for runtime errors. If the page's RAF loop is
-      // doing heavy work, this is fine — it's just sleeping our side.
+      // Short post-load init window so the game can wire up window.__game and
+      // start its RAF loop before we begin probing.
       await page.waitForTimeout(watchMs);
 
       // page.evaluate can hang if the page's JS thread is busy in an infinite
@@ -196,6 +348,17 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
       if (!drewSomething && !errors.some((e) => e.startsWith("page.evaluate"))) {
         errors.push("canvas: appears blank (only one color) after watch window — game may not be drawing");
       }
+
+      // Bail before playtest if there's already a fatal error — playtest
+      // results would be noise on top of an already-broken page.
+      if (errors.length > 0) return { ok: false, errors };
+
+      try {
+        await runPlaytest(page, errors);
+      } catch (e) {
+        errors.push(`playtest harness threw: ${(e as Error).message}`);
+      }
+
       return { ok: errors.length === 0, errors };
     })());
   } catch (e) {

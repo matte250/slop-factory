@@ -153,6 +153,32 @@ function startLoop() {
 
 When the player dies, draw on the canvas: "Game Over", final score, current high score (if you persist one), and "Press R or click Restart". Do not rely on the HTML restart button alone — players need to know they can restart.
 
+## Observable State Contract — required for playtest
+
+In addition to the rules above, your game **must** expose its current state on `window.__game` so the automated playtest can observe what the player would observe. A game that does not expose this object is rejected.
+
+```js
+window.__game = {
+  state: "menu",        // "menu" | "playing" | "gameover" — exact strings, no others
+  score: 0,             // current score, number
+  player: {
+    x: 400,             // player x in canvas coordinates (0 = left)
+    y: 300,             // player y in canvas coordinates (0 = top)
+    visible: true,      // true if the player is currently rendered inside the canvas viewport
+  },
+  objective: "Dodge falling neon blocks. Survive as long as possible.", // 10-200 chars, one sentence
+};
+```
+
+Rules:
+- The object must exist from the very first frame, before any input.
+- Update `state`, `score`, `player.x`, `player.y`, and `player.visible` whenever they change. The simplest approach is to update them at the end of your render/update step each frame.
+- `state` must only ever be one of the three exact strings. No other values.
+- `player.visible` is critical. **If your camera follows the player, the camera math must keep `player.visible` = true at all times.** A camera that lags the player off-screen is the most common failure here.
+- `objective` is one short sentence written for a first-time player: "what am I trying to do?" — derivable from observing the game alone, not from reading the meta.
+
+If your game has multiple "players" or no clear single player, expose the position of the most player-like entity (the thing the human controls).
+
 ## What the validator checks
 
 Your output is checked programmatically. Failure feeds the error report back to you for correction.
@@ -163,6 +189,11 @@ Your output is checked programmatically. Failure feeds the error report back to 
 4. No external URLs in `<script src=>`, `<link href=>`, `<img src=>` (regex scan).
 5. Headless Chromium loads the page; no `console.error` or `pageerror` events in 5 seconds.
 6. Canvas has non-blank pixels after 3 seconds (game is actually drawing something).
+7. **Observable contract is present**: `window.__game` exists with the exact shape above, from the first frame.
+8. **Playtest invariants** hold during ~8 seconds of synthetic key input (arrow keys, WASD, space):
+   - `state` only takes the values `"menu" | "playing" | "gameover"`.
+   - `player.visible` is true for ≥95% of polled frames.
+   - Either `score` changes at least once during play, or `state` reaches `"gameover"`. (A game where neither happens has no progress signal — broken even if it runs.)
 
 ## Tips
 
