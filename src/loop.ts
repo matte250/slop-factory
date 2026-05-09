@@ -8,28 +8,11 @@ import { gitOrThrow } from "./git_repo.ts";
 import { takeThumbnail } from "./screenshot.ts";
 import { publishGame } from "./publish.ts";
 import { notifyDiscord } from "./notify.ts";
+import { withDeadline } from "./deadline.ts";
 
 export type TickResult =
   | { ok: true; slug: string; durationMs: number }
   | { ok: false; error: string; durationMs: number };
-
-/**
- * Outer deadman: races a Promise against a timer that rejects. If the inner
- * work has its own kill/abort, this is belt-and-suspenders; if it doesn't
- * (e.g. a hang inside a 3rd-party module like playwright-core), this is the
- * only thing that lets the loop escape.
- */
-async function withDeadline<T>(label: string, ms: number, p: Promise<T>): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${label} exceeded deadline of ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([p, deadline]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 async function withRetries<T>(
   label: string,
