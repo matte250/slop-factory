@@ -66,6 +66,13 @@ export async function staticChecks(sandboxDir: string): Promise<ValidationResult
     errors.push(`index.html: found ${canvases.length} <canvas id="game"> elements; must be exactly 1`);
   }
 
+  const restartButtons = root.querySelectorAll("button#restart");
+  if (restartButtons.length === 0) {
+    errors.push('index.html: missing <button id="restart" class="game-restart">Restart</button> after the canvas — required so players can restart without keyboard');
+  } else if (restartButtons.length > 1) {
+    errors.push(`index.html: found ${restartButtons.length} <button id="restart"> elements; must be exactly 1`);
+  }
+
   const headers = root.querySelectorAll("header.game-header");
   if (headers.length === 0) {
     errors.push('index.html: missing <header class="game-header">');

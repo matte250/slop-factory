@@ -60,6 +60,7 @@ Rules:
   </header>
   <main>
     <canvas id="game" width="800" height="600"></canvas>
+    <button id="restart" class="game-restart" type="button">Restart</button>
   </main>
   <script>/* inline only */</script>
 </body>
@@ -67,6 +68,7 @@ Rules:
 ```
 
 - Exactly one `<canvas id="game">` (you may set width/height to other values; 800x600 is recommended).
+- Exactly one `<button id="restart" class="game-restart">` immediately after the canvas. Clicking it must fully reset the game (same code path as the R key). It must be visible and clickable at all times — not only on game-over.
 - The `<header>`'s `<h1>` text must match `meta.json.title` exactly.
 - The `<p class="game-description">` text must match `meta.json.description` exactly.
 - The `<li>` items in `<ul class="game-controls">` must match `meta.json.controls` in order.
@@ -89,7 +91,7 @@ Aim for these qualities in every game you produce:
 1. **Immediate input response** — every keystroke or click produces visible action within one frame. Never make the player wait.
 2. **Clear feedback** — the player always knows when something happened. Use color flashes, particles, brief screen shake, score popups, or sound on every meaningful event (hit, score, miss, death).
 3. **Win/lose state** — the game has a clear end condition. On lose, draw "Game Over" + final score + restart instructions on the canvas. On win, celebrate (color burst, "You Win!" overlay).
-4. **Restart without page reload** — pressing R (or clicking) resets state cleanly. Mention this in `controls`.
+4. **Restart without page reload** — both pressing R AND clicking the `<button id="restart">` reset the game cleanly via the same code path. Mention both in `controls` (e.g. "Press R or click Restart"). On restart you MUST `cancelAnimationFrame` any pending loop before starting a new one (otherwise loops stack on each restart and the game eventually slows to a crawl).
 5. **Progressive difficulty** — start gentle so the player can learn, then ramp up. Don't dump them into chaos at t=0.
 6. **No dead time** — something interesting on screen at all times. Idle background animation (stars, gradient pulse, particles) is fine.
 7. **Persistent score / progress UI** — drawn on the canvas at the top corner, always visible.
@@ -101,7 +103,7 @@ Your output is checked programmatically. Failure feeds the error report back to 
 
 1. Both `index.html` and `meta.json` exist.
 2. `meta.json` parses as JSON and matches the schema above.
-3. `index.html` parses, has exactly one `<canvas id="game">`, and the `<header>` text matches `meta.json`.
+3. `index.html` parses, has exactly one `<canvas id="game">`, exactly one `<button id="restart">` after it, and the `<header>` text matches `meta.json`.
 4. No external URLs in `<script src=>`, `<link href=>`, `<img src=>` (regex scan).
 5. Headless Chromium loads the page; no `console.error` or `pageerror` events in 5 seconds.
 6. Canvas has non-blank pixels after 3 seconds (game is actually drawing something).
