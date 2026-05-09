@@ -123,6 +123,53 @@ export type BrowserCheckOptions = {
   watchMs?: number;
 };
 
+/**
+ * Fast-path browser load that captures only runtime errors. Used by the
+ * implement-stage console-fix iteration loop where running the full
+ * browserChecks (with playtest) per iteration would be wasteful.
+ */
+export async function consoleErrorCheck(
+  sandboxDir: string,
+  watchMs = 3_000,
+): Promise<string[]> {
+  const errors: string[] = [];
+  const { chromium } = await import("playwright-core");
+  const browser = await withDeadline(
+    "consoleCheck.launch",
+    15_000,
+    chromium.launch({ headless: true, timeout: 15_000 }),
+  );
+  try {
+    return await withDeadline("consoleCheck.run", 25_000, (async (): Promise<string[]> => {
+      const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
+      const page = await context.newPage();
+      page.setDefaultTimeout(10_000);
+      page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));
+      page.on("console", (msg) => {
+        if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`);
+      });
+      const url = pathToFileURL(join(sandboxDir, "index.html")).href;
+      try {
+        await page.goto(url, { waitUntil: "load", timeout: 10_000 });
+      } catch (e) {
+        errors.push(`failed to load page: ${(e as Error).message}`);
+        return errors;
+      }
+      await page.waitForTimeout(watchMs);
+      return errors;
+    })());
+  } catch (e) {
+    errors.push(`consoleCheck failed: ${(e as Error).message}`);
+    return errors;
+  } finally {
+    try {
+      await withDeadline("consoleCheck.close", 5_000, browser.close());
+    } catch (e) {
+      log.warn("consoleCheck: browser.close timed out / failed", { error: (e as Error).message });
+    }
+  }
+}
+
 const PLAYTEST_KEYS = [
   "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
   "Space", "KeyW", "KeyA", "KeyS", "KeyD",

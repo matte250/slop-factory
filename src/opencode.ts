@@ -6,6 +6,8 @@ export type OpenCodeRunOptions = {
   sandboxDir: string;
   prompt: string;
   signal?: AbortSignal;
+  /** If set, resume this opencode session instead of starting a fresh one. */
+  sessionId?: string;
 };
 
 export type OpenCodeRunResult = {
@@ -17,6 +19,8 @@ export type OpenCodeRunResult = {
   /** True if we observed opencode emit a step_finish event with reason "stop" (real done signal). */
   taskCompleted: boolean;
   durationMs: number;
+  /** Session ID observed in the event stream (first non-empty sessionID seen). */
+  sessionId?: string;
 };
 
 type OpenCodeEvent = {
@@ -44,6 +48,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     "--dangerously-skip-permissions",
     "--model", cfg.OPENCODE_MODEL,
     "--dir", opts.sandboxDir,
+    ...(opts.sessionId ? ["--session", opts.sessionId] : []),
     opts.prompt,
   ];
 
@@ -51,6 +56,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     model: cfg.OPENCODE_MODEL,
     dir: opts.sandboxDir,
     promptLen: opts.prompt.length,
+    resumingSession: opts.sessionId,
   });
 
   const startedAt = Date.now();
@@ -73,6 +79,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     let stdoutBuf = "";
     let stderrBuf = "";
     let deadman: NodeJS.Timeout | null = null;
+    let observedSessionId: string | undefined = opts.sessionId;
 
     const killTree = (signal: "SIGTERM" | "SIGKILL") => {
       if (child.pid == null) return;
@@ -96,6 +103,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     };
 
     const handleEvent = (ev: OpenCodeEvent) => {
+      if (!observedSessionId && ev.sessionID) observedSessionId = ev.sessionID;
       switch (ev.type) {
         case "step_start":
           log.info("opencode step.start", { sessionID: ev.sessionID });
@@ -206,6 +214,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
       timedOut,
       taskCompleted,
       durationMs: Date.now() - startedAt,
+      sessionId: observedSessionId,
     });
 
     const timeout = setTimeout(() => {

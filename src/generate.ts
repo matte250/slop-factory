@@ -5,6 +5,7 @@ import { createSandbox, type Sandbox } from "./sandbox.ts";
 import { writeConventions } from "./conventions.ts";
 import { runOpenCode } from "./opencode.ts";
 import {
+  consoleErrorCheck,
   validate,
   validateDesign,
   validateWithCritiqueBlock,
@@ -54,6 +55,15 @@ type StageDef = {
   name: StageName;
   buildPrompt: (idea: GameIdea, attempt: number, lastErrors: string[]) => string;
   validate: (sandboxDir: string) => Promise<ValidationResult>;
+  /**
+   * If true, after the initial opencode run completes, load the page and
+   * check for runtime/console errors. If any are found, resume the SAME
+   * opencode session with the errors as a new turn and ask it to fix. Repeat
+   * up to IMPLEMENT_CONSOLE_FIX_ITERATIONS times (from config). Only the
+   * implement stage uses this — later stages have the full validate() loop
+   * with retries that already covers regressions.
+   */
+  iterativeConsoleFix?: boolean;
 };
 
 const STAGE_DEFINITIONS: StageDef[] = [
@@ -62,6 +72,7 @@ const STAGE_DEFINITIONS: StageDef[] = [
     buildPrompt: (idea, attempt, lastErrors) =>
       attempt === 1 ? buildImplementPrompt(idea) : buildRetryPrompt("implement", idea, lastErrors, attempt),
     validate,
+    iterativeConsoleFix: true,
   },
   {
     name: "critique",
@@ -254,6 +265,19 @@ async function restoreSnapshot(sandbox: Sandbox, snapshotDir: string): Promise<v
   await copyFile(join(snapshotDir, "meta.json"), join(sandbox.dir, "meta.json"));
 }
 
+function buildConsoleFixPrompt(errors: string[], iter: number, maxIter: number): string {
+  return [
+    `Your previous output produced runtime errors when the page was loaded in a real browser. Fix them by editing the existing index.html in place — do not start over.`,
+    "",
+    "Console / runtime errors observed:",
+    ...errors.map((e) => `- ${e}`),
+    "",
+    `This is fix iteration ${iter} of ${maxIter}. After editing, your output will be reloaded and re-checked. If errors persist after ${maxIter} iterations, this attempt will be abandoned.`,
+    "",
+    "Re-read your code, locate the line(s) responsible for each error above, and fix them. Pay particular attention to: undefined variables, accessing properties of null/undefined, async ordering, and AudioContext / canvas-context initialization timing.",
+  ].join("\n");
+}
+
 async function runStage(
   sandbox: Sandbox,
   idea: GameIdea,
@@ -261,6 +285,7 @@ async function runStage(
   stageNum: number,
   maxAttempts: number,
 ): Promise<{ ok: boolean; meta?: GameMeta; errors: string[]; attempts: number; durationMs: number }> {
+  const cfg = loadConfig();
   const startedAt = Date.now();
   let lastErrors: string[] = [];
   let lastValidation: ValidationResult | undefined;
@@ -270,6 +295,43 @@ async function runStage(
 
     const prompt = stageDef.buildPrompt(idea, attempt, lastErrors);
     const oc = await runOpenCode({ sandboxDir: sandbox.dir, prompt });
+
+    // Iterative in-session fix loop: re-run the page, capture any console
+    // errors, and resume the same opencode session asking the model to fix.
+    // Only enabled for stages that opted in (currently: implement). Bounded
+    // by IMPLEMENT_CONSOLE_FIX_ITERATIONS so a model that can't converge
+    // doesn't burn forever.
+    if (stageDef.iterativeConsoleFix && oc.sessionId) {
+      const maxIter = cfg.IMPLEMENT_CONSOLE_FIX_ITERATIONS;
+      let sid: string | undefined = oc.sessionId;
+      for (let iter = 1; iter <= maxIter; iter++) {
+        const errs = await consoleErrorCheck(sandbox.dir);
+        if (errs.length === 0) {
+          if (iter > 1) {
+            log.info("stage: console-fix loop converged", {
+              stage: stageNum, name: stageDef.name, attempt, iterationsUsed: iter - 1,
+            });
+          }
+          break;
+        }
+        log.warn("stage: console errors found, resuming session to fix", {
+          stage: stageNum, name: stageDef.name, attempt, iter, maxIter, errorCount: errs.length,
+        });
+        if (iter === maxIter) {
+          log.warn("stage: console-fix budget exhausted; proceeding to validate anyway", {
+            stage: stageNum, name: stageDef.name, attempt, maxIter,
+          });
+          break;
+        }
+        const fixPrompt = buildConsoleFixPrompt(errs, iter, maxIter);
+        const ocFix = await runOpenCode({
+          sandboxDir: sandbox.dir,
+          prompt: fixPrompt,
+          sessionId: sid,
+        });
+        sid = ocFix.sessionId ?? sid;
+      }
+    }
 
     // Always validate, regardless of opencode's exit code. We proactively
     // kill opencode after seeing its terminal step_finish/stop event (workaround
