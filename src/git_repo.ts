@@ -7,7 +7,13 @@ export type GitResult = {
   stderr: string;
 };
 
-export async function git(cwd: string, args: string[]): Promise<GitResult> {
+export type GitOptions = {
+  /** Kill the git process if it hasn't finished in this many ms. */
+  timeoutMs?: number;
+};
+
+export async function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitResult> {
+  const timeoutMs = opts.timeoutMs ?? 90_000;
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,
@@ -19,10 +25,25 @@ export async function git(cwd: string, args: string[]): Promise<GitResult> {
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      log.warn("git timeout, killing", { cwd, args, timeoutMs });
+      try { child.kill("SIGTERM"); } catch {}
+      setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5_000);
+    }, timeoutMs);
     child.stdout.on("data", (b) => stdout.push(b));
     child.stderr.on("data", (b) => stderr.push(b));
-    child.on("error", reject);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
     child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`git ${args.join(" ")} timed out after ${timeoutMs}ms`));
+        return;
+      }
       resolve({
         exitCode: code ?? -1,
         stdout: Buffer.concat(stdout).toString("utf-8"),
@@ -32,8 +53,8 @@ export async function git(cwd: string, args: string[]): Promise<GitResult> {
   });
 }
 
-export async function gitOrThrow(cwd: string, args: string[]): Promise<GitResult> {
-  const r = await git(cwd, args);
+export async function gitOrThrow(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitResult> {
+  const r = await git(cwd, args, opts);
   if (r.exitCode !== 0) {
     log.error("git failed", { cwd, args, exitCode: r.exitCode, stderr: r.stderr.slice(-500) });
     throw new Error(`git ${args.join(" ")} failed (exit ${r.exitCode}): ${r.stderr.slice(-500)}`);

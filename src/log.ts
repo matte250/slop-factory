@@ -1,5 +1,15 @@
 type Level = "debug" | "info" | "warn" | "error";
 
+// sd-daemon(3) priority prefix: journald reads <N> at the start of a line and
+// stores the rest as MESSAGE with PRIORITY=N. journalctl then colors err red,
+// warning yellow, and `-p err` filtering works as expected.
+const PRIORITY: Record<Level, string> = {
+  debug: "<7>",
+  info: "<6>",
+  warn: "<4>",
+  error: "<3>",
+};
+
 function emit(level: Level, msg: string, fields?: Record<string, unknown>) {
   const line = {
     ts: new Date().toISOString(),
@@ -8,7 +18,7 @@ function emit(level: Level, msg: string, fields?: Record<string, unknown>) {
     ...(fields ?? {}),
   };
   const stream = level === "error" || level === "warn" ? process.stderr : process.stdout;
-  stream.write(JSON.stringify(line) + "\n");
+  stream.write(PRIORITY[level] + JSON.stringify(line) + "\n");
 }
 
 export const log = {

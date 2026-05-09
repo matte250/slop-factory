@@ -19,7 +19,9 @@ export async function takeThumbnail(opts: ScreenshotOptions): Promise<void> {
   const height = opts.height ?? 400;
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ headless: true });
+  // launch can hang if the browser binary can't be resolved (playwright-core
+  // doesn't ship browsers); cap it explicitly so we fail loudly instead.
+  const browser = await chromium.launch({ headless: true, timeout: 30_000 });
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
     const page = await context.newPage();
