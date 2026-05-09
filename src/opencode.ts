@@ -50,9 +50,44 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     const stderrChunks: Buffer[] = [];
     let timedOut = false;
     let settled = false;
+    let lastActivityAt = Date.now();
 
-    child.stdout.on("data", (b: Buffer) => stdoutChunks.push(b));
-    child.stderr.on("data", (b: Buffer) => stderrChunks.push(b));
+    // Stream output line-by-line so the journal shows real-time progress
+    // (opencode emits "→ Read foo", "← Write bar" markers per tool call).
+    const streamer = (label: "stdout" | "stderr") => {
+      let buf = "";
+      return (b: Buffer) => {
+        lastActivityAt = Date.now();
+        buf += b.toString("utf-8");
+        let i: number;
+        while ((i = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, i).trimEnd();
+          buf = buf.slice(i + 1);
+          if (line) log.info("opencode " + label, { line: line.slice(0, 500) });
+        }
+      };
+    };
+    child.stdout.on("data", (b: Buffer) => {
+      stdoutChunks.push(b);
+      streamer("stdout")(b);
+    });
+    child.stderr.on("data", (b: Buffer) => {
+      stderrChunks.push(b);
+      streamer("stderr")(b);
+    });
+
+    // Heartbeat so the journal shows liveness even when the model is silent
+    // (reasoning tokens don't stream, so a long think looks identical to a hang).
+    const heartbeat = setInterval(() => {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      const idleSec = Math.round((Date.now() - lastActivityAt) / 1000);
+      log.info("opencode.run heartbeat", {
+        elapsedSec,
+        idleSec,
+        stdoutBytes: stdoutChunks.reduce((n, b) => n + b.length, 0),
+        stderrBytes: stderrChunks.reduce((n, b) => n + b.length, 0),
+      });
+    }, 60_000);
 
     const killTree = (signal: "SIGTERM" | "SIGKILL") => {
       if (child.pid == null) return;
@@ -71,6 +106,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
       settled = true;
       clearTimeout(timeout);
       clearTimeout(deadman);
+      clearInterval(heartbeat);
       opts.signal?.removeEventListener("abort", onAbort);
       log.info("opencode.run finished", {
         exitCode: result.exitCode,
@@ -125,6 +161,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
       settled = true;
       clearTimeout(timeout);
       clearTimeout(deadman);
+      clearInterval(heartbeat);
       opts.signal?.removeEventListener("abort", onAbort);
       log.error("opencode.run spawn error", { err: String(err) });
       reject(err);
