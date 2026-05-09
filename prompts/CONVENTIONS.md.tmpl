@@ -97,6 +97,62 @@ Aim for these qualities in every game you produce:
 7. **Persistent score / progress UI** — drawn on the canvas at the top corner, always visible.
 8. **Audio (optional but encouraged)** — generate tones with `OscillatorNode` (no external assets). **Do not auto-start audio on page load** — browsers block this and it will throw. Initialize the `AudioContext` lazily on the first keypress or click. Wrap audio code in try/catch.
 
+## Playable Contract — non-negotiable
+
+These are not aspirations. A game that violates any of these is broken even if it runs without errors. They will be checked explicitly during the critique stage.
+
+### 1. The player can lose
+
+There must be a collision check (or other end condition) that fires `gameOver` and stops the active gameplay loop. "Game runs forever, no death" is broken. Examples that have failed in the past: collision check compared a value against itself; "spike" collision only clamped position instead of killing the player; obstacles never reached the player.
+
+### 2. The player can score
+
+The score must increase on a **discrete event** (a survived obstacle, a collected pickup, an enemy destroyed, a beat hit). "Score = elapsed seconds" is allowed but weak. Score must be drawn on the canvas at all times.
+
+### 3. The first 3 seconds are survivable with no input
+
+Define a `SAFE_RADIUS` (e.g. 200px) around the player's starting position. When spawning hazards, **reject any spawn that is within `SAFE_RADIUS` of the player AND would reach them within 3 seconds at current hazard speed**. Pre-spawning hazards on top of the player at t=0 has caused frame-1 deaths in past games. Don't do it.
+
+### 4. The control actually changes the outcome
+
+Whatever the player presses must, in the next frame, change a value that affects collision or score. If a control is purely cosmetic (e.g. "stretch horizontally" but the gaps are vertical), the game is fundamentally broken even if it runs. After writing, **re-read the game's concept and trace one frame**: does the input do what the concept claims?
+
+### 5. dt-based physics, not per-frame constants
+
+All movement and timing must scale by delta time (seconds since last frame). Per-frame constants (`x += 5` every frame) make games run 2.4× faster on a 144Hz display.
+
+```js
+let lastTime = performance.now();
+function loop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.1); // seconds, clamped
+  lastTime = now;
+  // physics scaled by dt:
+  player.x += player.vx * dt;
+  enemy.y  += enemy.vy  * dt;
+  spawnTimer -= dt;
+  // ...
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+```
+
+### 6. Restart fully resets AND cancels the prior loop
+
+Both R and the Restart button must call the same reset function. That function MUST `cancelAnimationFrame(loopId)` the previous loop before scheduling a new one — otherwise loops stack on each restart and the game slows to a crawl over time.
+
+```js
+let loopId = null;
+function startLoop() {
+  if (loopId !== null) cancelAnimationFrame(loopId);
+  function tick(now) { /* ... */ loopId = requestAnimationFrame(tick); }
+  loopId = requestAnimationFrame(tick);
+}
+```
+
+### 7. Game-over overlay shows score and restart instructions
+
+When the player dies, draw on the canvas: "Game Over", final score, current high score (if you persist one), and "Press R or click Restart". Do not rely on the HTML restart button alone — players need to know they can restart.
+
 ## What the validator checks
 
 Your output is checked programmatically. Failure feeds the error report back to you for correction.
