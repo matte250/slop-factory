@@ -165,23 +165,39 @@ async function runStage(
 
     const prompt = stageDef.buildPrompt(idea, attempt, lastErrors);
     const oc = await runOpenCode({ sandboxDir: sandbox.dir, prompt });
-    if (oc.exitCode !== 0) {
-      lastErrors = [
-        `opencode exited with code ${oc.exitCode}${oc.timedOut ? " (TIMED OUT)" : ""}`,
-        oc.stderr.slice(-800),
-      ];
-      log.warn("stage: opencode non-zero exit", { stage: stageNum, attempt, exitCode: oc.exitCode });
-      continue;
-    }
 
+    // Always validate, regardless of opencode's exit code. We proactively
+    // kill opencode after seeing its terminal step_finish/stop event (workaround
+    // for the upstream hang regression), so a non-zero exit is normal — what
+    // matters is whether the files on disk are valid.
     lastValidation = await validate(sandbox.dir);
     if (lastValidation.ok && lastValidation.meta) {
       const durationMs = Date.now() - startedAt;
-      log.info("stage: success", { stage: stageNum, name: stageDef.name, attempt, durationMs });
+      log.info("stage: success", {
+        stage: stageNum,
+        name: stageDef.name,
+        attempt,
+        durationMs,
+        exitCode: oc.exitCode,
+        taskCompleted: oc.taskCompleted,
+        timedOut: oc.timedOut,
+      });
       return { ok: true, meta: lastValidation.meta, errors: [], attempts: attempt, durationMs };
     }
+
     lastErrors = lastValidation.errors;
-    log.warn("stage: validation failed", { stage: stageNum, attempt, errorCount: lastErrors.length });
+    if (!oc.taskCompleted) {
+      lastErrors = [
+        `opencode did not signal task completion (exit ${oc.exitCode}${oc.timedOut ? ", HARD TIMEOUT" : ""})`,
+        ...lastErrors,
+      ];
+    }
+    log.warn("stage: validation failed", {
+      stage: stageNum,
+      attempt,
+      exitCode: oc.exitCode,
+      errorCount: lastErrors.length,
+    });
   }
 
   return {
