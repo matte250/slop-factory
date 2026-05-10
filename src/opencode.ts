@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
+import { killProcessGroup } from "./subprocess.ts";
+import {
+  describeEvent,
+  isStopEvent,
+  type OpenCodeEvent,
+} from "./opencode-events.ts";
 
 export type OpenCodeRunOptions = {
   sandboxDir: string;
@@ -21,19 +27,6 @@ export type OpenCodeRunResult = {
   durationMs: number;
   /** Session ID observed in the event stream (first non-empty sessionID seen). */
   sessionId?: string;
-};
-
-type OpenCodeEvent = {
-  type?: string;
-  sessionID?: string;
-  part?: {
-    type?: string;
-    reason?: string;
-    tool?: string;
-    text?: string;
-    state?: { input?: Record<string, unknown>; output?: string };
-    tokens?: { total?: number; input?: number; output?: number; reasoning?: number };
-  };
 };
 
 export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRunResult> {
@@ -81,16 +74,8 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     let deadman: NodeJS.Timeout | null = null;
     let observedSessionId: string | undefined = opts.sessionId;
 
-    const killTree = (signal: "SIGTERM" | "SIGKILL") => {
-      if (child.pid == null) return;
-      try {
-        process.kill(-child.pid, signal);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ESRCH") {
-          log.warn("opencode.run kill failed", { signal, err: String(e) });
-        }
-      }
-    };
+    const kill = (signal: "SIGTERM" | "SIGKILL") =>
+      killProcessGroup(child.pid, signal, "opencode.run");
 
     const armDeadman = (graceMs: number, on: "task-complete" | "hard-timeout") => {
       deadman = setTimeout(() => {
@@ -104,46 +89,21 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
 
     const handleEvent = (ev: OpenCodeEvent) => {
       if (!observedSessionId && ev.sessionID) observedSessionId = ev.sessionID;
-      switch (ev.type) {
-        case "step_start":
-          log.info("opencode step.start", { sessionID: ev.sessionID });
-          break;
-        case "tool_use": {
-          const inputSummary: Record<string, string> = {};
-          const input = ev.part?.state?.input ?? {};
-          for (const [k, v] of Object.entries(input)) {
-            const s = typeof v === "string" ? v : JSON.stringify(v);
-            inputSummary[k] = s.length > 80 ? s.slice(0, 80) + "…" : s;
-          }
-          log.info("opencode step.tool", { tool: ev.part?.tool, input: inputSummary });
-          break;
-        }
-        case "text":
-          log.info("opencode step.text", { preview: ev.part?.text?.slice(0, 200) });
-          break;
-        case "step_finish":
-          log.info("opencode step.finish", {
-            reason: ev.part?.reason,
-            tokensTotal: ev.part?.tokens?.total,
-            tokensOutput: ev.part?.tokens?.output,
-            reasoning: ev.part?.tokens?.reasoning,
-          });
-          // Terminal event: model decided to stop. Session is complete.
-          // opencode 0.15+ has a regression where it doesn't exit on its own
-          // (https://github.com/sst/opencode/issues/3213), so we kill the
-          // process group ourselves and treat the exit as success.
-          if (ev.part?.reason === "stop" && !taskCompleted) {
-            taskCompleted = true;
-            log.info("opencode.run task complete, killing process group", {
-              elapsedMs: Date.now() - startedAt,
-            });
-            killTree("SIGTERM");
-            setTimeout(() => killTree("SIGKILL"), 5_000);
-            armDeadman(10_000, "task-complete");
-          }
-          break;
-        default:
-          log.debug("opencode event", { type: ev.type });
+      const desc = describeEvent(ev);
+      if (desc) log.info(desc.msg, desc.fields);
+      else log.debug("opencode event", { type: ev.type });
+
+      // Terminal event: model decided to stop. opencode 0.15+ has a regression
+      // where it doesn't exit on its own (sst/opencode#3213), so we kill the
+      // process group ourselves and treat the exit as success.
+      if (isStopEvent(ev) && !taskCompleted) {
+        taskCompleted = true;
+        log.info("opencode.run task complete, killing process group", {
+          elapsedMs: Date.now() - startedAt,
+        });
+        kill("SIGTERM");
+        setTimeout(() => kill("SIGKILL"), 5_000);
+        armDeadman(10_000, "task-complete");
       }
     };
 
@@ -220,15 +180,15 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     const timeout = setTimeout(() => {
       timedOut = true;
       log.warn("opencode.run hard timeout, killing process group", { ms: cfg.OPENCODE_TIMEOUT_MS });
-      killTree("SIGTERM");
-      setTimeout(() => killTree("SIGKILL"), 5_000);
+      kill("SIGTERM");
+      setTimeout(() => kill("SIGKILL"), 5_000);
       armDeadman(15_000, "hard-timeout");
     }, cfg.OPENCODE_TIMEOUT_MS);
 
     const onAbort = () => {
       log.warn("opencode.run aborted via signal");
-      killTree("SIGTERM");
-      setTimeout(() => killTree("SIGKILL"), 5_000);
+      kill("SIGTERM");
+      setTimeout(() => kill("SIGKILL"), 5_000);
     };
     if (opts.signal) {
       if (opts.signal.aborted) onAbort();

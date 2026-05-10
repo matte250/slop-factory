@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { log } from "./log.ts";
+import { killProcessGroup } from "./subprocess.ts";
 
 export type GitResult = {
   exitCode: number;
@@ -34,16 +35,8 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
     let settled = false;
     let deadman: NodeJS.Timeout | null = null;
 
-    const killTree = (signal: "SIGTERM" | "SIGKILL") => {
-      if (child.pid == null) return;
-      try {
-        process.kill(-child.pid, signal);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ESRCH") {
-          log.warn("git kill failed", { signal, err: String(e) });
-        }
-      }
-    };
+    const killTree = (signal: "SIGTERM" | "SIGKILL") =>
+      killProcessGroup(child.pid, signal, `git ${args.join(" ")}`);
 
     const settle = (fn: () => void) => {
       if (settled) return;
