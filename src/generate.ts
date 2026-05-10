@@ -15,7 +15,7 @@ import { formatExampleForPrompt, loadExampleFor } from "./examples.ts";
 import { loadPrompt } from "./prompts.ts";
 import { log } from "./log.ts";
 import type { GameIdea } from "./ideate.ts";
-import type { GameMeta } from "./games_index.ts";
+import type { GameMeta } from "./games-index.ts";
 
 export type StageName = "implement" | "critique" | "polish";
 

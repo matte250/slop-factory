@@ -4,7 +4,7 @@ import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { ideate } from "./ideate.ts";
 import { generateGame } from "./generate.ts";
-import { gitOrThrow } from "./git_repo.ts";
+import { gitOrThrow } from "./git-repo.ts";
 import { takeThumbnail } from "./screenshot.ts";
 import { publishGame } from "./publish.ts";
 import { notifyDiscord } from "./notify.ts";

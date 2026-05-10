@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
-import type { GameMeta } from "./games_index.ts";
+import type { GameMeta } from "./games-index.ts";
 
 export type NotifyInput = {
   meta: GameMeta;

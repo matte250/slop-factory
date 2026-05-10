@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { chat } from "./llm.ts";
 import { log } from "./log.ts";
-import { readGamesIndex, uniqueSlug, type GameIndexEntry } from "./games_index.ts";
+import { readGamesIndex, uniqueSlug, type GameIndexEntry } from "./games-index.ts";
 
 export type GameIdea = {
   title: string;

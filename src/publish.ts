@@ -1,13 +1,13 @@
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
-import { gitOrThrow } from "./git_repo.ts";
+import { gitOrThrow } from "./git-repo.ts";
 import {
   GameIndexSchema,
   type GameIndexEntry,
   type GameMeta,
-} from "./games_index.ts";
-import { readGamesIndex } from "./games_index.ts";
+} from "./games-index.ts";
+import { readGamesIndex } from "./games-index.ts";
 import { log } from "./log.ts";
 
 export type PublishInput = {

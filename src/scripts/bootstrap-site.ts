@@ -1,4 +1,4 @@
-import { bootstrapSite } from "../bootstrap_site.ts";
+import { bootstrapSite } from "../bootstrap-site.ts";
 import { loadConfig } from "../config.ts";
 
 const cfg = loadConfig();

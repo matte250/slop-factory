@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { GameMetaSchema } from "../games_index.ts";
+import { GameMetaSchema } from "../games-index.ts";
 import { takeThumbnail } from "../screenshot.ts";
 import { publishGame } from "../publish.ts";
 import { log } from "../log.ts";

@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse, type HTMLElement } from "node-html-parser";
-import { GameMetaSchema, type GameMeta } from "./games_index.ts";
+import { GameMetaSchema, type GameMeta } from "./games-index.ts";
 import { withDeadline } from "./deadline.ts";
 import { log } from "./log.ts";
 

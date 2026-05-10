@@ -2,7 +2,7 @@ import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
-import { authedRemoteUrl, git, gitOrThrow } from "./git_repo.ts";
+import { authedRemoteUrl, git, gitOrThrow } from "./git-repo.ts";
 import { log } from "./log.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
