@@ -60,10 +60,11 @@ export async function runOnce(): Promise<TickResult> {
         failedPhase: gen.failedPhase,
         errors: gen.errors,
       });
-      // Best-effort: publish a failure log if we got far enough to have an
-      // implementation attempt. Failures earlier than implement (e.g. tasks
-      // never produced TASKS.md) aren't interesting enough to bloat the repo.
-      if (gen.failedPhase === "implement") {
+      // Best-effort: publish a failure log for ANY generate-phase failure.
+      // The model's actual chat-text output (what it "said" when it failed
+      // to write a file, etc.) is captured per-transcript in <label>.text.txt
+      // and surfaced at the top of each transcript block in the viewer.
+      if (gen.failedPhase) {
         try {
           log.phase("publish-failure-log");
           await withDeadline(

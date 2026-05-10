@@ -75,6 +75,10 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
           prompt: join(opts.transcriptDir, `${opts.transcriptLabel}.prompt.txt`),
           events: join(opts.transcriptDir, `${opts.transcriptLabel}.events.jsonl`),
           summary: join(opts.transcriptDir, `${opts.transcriptLabel}.summary.json`),
+          // Concatenated `text` events — what the model literally said in chat,
+          // separate from tool calls. This is the field to look at when
+          // debugging "why did the model not write a file?".
+          text: join(opts.transcriptDir, `${opts.transcriptLabel}.text.txt`),
         }
       : null;
 
@@ -84,6 +88,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     try {
       await writeFile(transcriptPaths.prompt, opts.prompt, "utf-8");
       await writeFile(transcriptPaths.events, "", "utf-8"); // truncate
+      await writeFile(transcriptPaths.text, "", "utf-8");   // truncate
     } catch (e) {
       log.warn("opencode.run: transcript pre-write failed", { error: (e as Error).message });
     }
@@ -158,10 +163,25 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
           // through the FS, and dropped writes only affect post-mortem logs.
           appendFile(transcriptPaths.events, line + "\n", "utf-8").catch(() => {});
         }
+        let parsed: OpenCodeEvent | null = null;
         try {
-          handleEvent(JSON.parse(line) as OpenCodeEvent);
+          parsed = JSON.parse(line) as OpenCodeEvent;
         } catch {
           log.warn("opencode stdout non-json", { line: line.slice(0, 300) });
+        }
+        if (parsed) {
+          // Capture the natural-language chat text the model produced, separate
+          // from tool calls. Useful when debugging "model said something but
+          // didn't write a file."
+          if (
+            transcriptPaths &&
+            parsed.type === "text" &&
+            typeof parsed.part?.text === "string" &&
+            parsed.part.text.length > 0
+          ) {
+            appendFile(transcriptPaths.text, parsed.part.text, "utf-8").catch(() => {});
+          }
+          handleEvent(parsed);
         }
       }
     });

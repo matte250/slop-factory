@@ -184,6 +184,8 @@ type TranscriptEntry = {
   promptFile?: string;
   eventsFile?: string;
   summaryFile?: string;
+  /** Concatenated `text` events — what the model literally said in chat. */
+  textFile?: string;
 };
 
 async function copyTranscripts(
@@ -200,12 +202,17 @@ async function copyTranscripts(
   if (entries.length === 0) return [];
   await mkdir(dst, { recursive: true });
 
-  // Group by label (the part before .prompt.txt / .events.jsonl / .summary.json).
+  // Group by label (the part before .prompt.txt / .events.jsonl / .summary.json / .text.txt).
   const byLabel = new Map<string, TranscriptEntry>();
   for (const name of entries) {
     let label: string | null = null;
     let kind: keyof TranscriptEntry | null = null;
-    if (name.endsWith(".prompt.txt")) {
+    // Order matters: ".text.txt" must be checked before ".prompt.txt" since
+    // both end in ".txt", but the suffixes differ.
+    if (name.endsWith(".text.txt")) {
+      label = name.slice(0, -".text.txt".length);
+      kind = "textFile";
+    } else if (name.endsWith(".prompt.txt")) {
       label = name.slice(0, -".prompt.txt".length);
       kind = "promptFile";
     } else if (name.endsWith(".events.jsonl")) {
@@ -432,12 +439,15 @@ async function renderTranscripts(transcripts: TranscriptEntry[], transcriptsDir:
     const summary = t.summaryFile ? await readSafe(join(transcriptsDir, t.summaryFile)) : null;
     const prompt = t.promptFile ? await readSafe(join(transcriptsDir, t.promptFile)) : null;
     const events = t.eventsFile ? await readSafe(join(transcriptsDir, t.eventsFile)) : null;
+    const text = t.textFile ? await readSafe(join(transcriptsDir, t.textFile)) : null;
+    const hasText = text != null && text.length > 0;
     blocks.push(`
-<details>
-  <summary>${escapeHtml(t.label)}</summary>
+<details${hasText ? " open" : ""}>
+  <summary>${escapeHtml(t.label)}${hasText ? "" : " <span style=\"color:#a5a5b8;font-size:11px\">(no chat text — only tool calls)</span>"}</summary>
   ${summary ? `<pre>${escapeHtml(summary)}</pre>` : ""}
+  ${hasText ? `<div style="margin:8px 0;color:#a5a5b8;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Model output (chat text)</div><pre style="background:#0f1320;border-color:#3a4a64;color:#9dffd1">${escapeHtml(text!)}</pre>` : ""}
   ${prompt ? `<details><summary>prompt (${prompt.length.toLocaleString()} chars)</summary><pre>${escapeHtml(prompt)}</pre></details>` : ""}
-  ${events ? `<details><summary>events (${events.split("\n").length - 1} lines)</summary><pre>${escapeHtml(events)}</pre></details>` : ""}
+  ${events ? `<details><summary>raw events (${events.split("\n").length - 1} lines)</summary><pre>${escapeHtml(events)}</pre></details>` : ""}
 </details>`);
   }
   return blocks.join("\n");
