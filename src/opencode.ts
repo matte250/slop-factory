@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { writeFile, appendFile } from "node:fs/promises";
+import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { killProcessGroup } from "./subprocess.ts";
@@ -14,6 +16,15 @@ export type OpenCodeRunOptions = {
   signal?: AbortSignal;
   /** If set, resume this opencode session instead of starting a fresh one. */
   sessionId?: string;
+  /**
+   * If set together with `transcriptLabel`, runOpenCode writes:
+   *   <transcriptDir>/<label>.prompt.txt   — the exact prompt sent
+   *   <transcriptDir>/<label>.events.jsonl — every JSON event opencode emitted
+   *   <transcriptDir>/<label>.summary.json — final result metadata
+   * These get bundled into the failure log if the run later fails.
+   */
+  transcriptDir?: string;
+  transcriptLabel?: string;
 };
 
 export type OpenCodeRunResult = {
@@ -55,7 +66,28 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     dir: opts.sandboxDir,
     promptLen: opts.prompt.length,
     resumingSession: opts.sessionId,
+    transcript: opts.transcriptLabel,
   });
+
+  const transcriptPaths =
+    opts.transcriptDir && opts.transcriptLabel
+      ? {
+          prompt: join(opts.transcriptDir, `${opts.transcriptLabel}.prompt.txt`),
+          events: join(opts.transcriptDir, `${opts.transcriptLabel}.events.jsonl`),
+          summary: join(opts.transcriptDir, `${opts.transcriptLabel}.summary.json`),
+        }
+      : null;
+
+  if (transcriptPaths) {
+    // Best-effort: failures here only emit a warn; we don't want a transcript
+    // disk error to take down the actual opencode run.
+    try {
+      await writeFile(transcriptPaths.prompt, opts.prompt, "utf-8");
+      await writeFile(transcriptPaths.events, "", "utf-8"); // truncate
+    } catch (e) {
+      log.warn("opencode.run: transcript pre-write failed", { error: (e as Error).message });
+    }
+  }
 
   const startedAt = Date.now();
 
@@ -121,6 +153,11 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
         const line = stdoutBuf.slice(0, i).trimEnd();
         stdoutBuf = stdoutBuf.slice(i + 1);
         if (!line) continue;
+        if (transcriptPaths) {
+          // Fire-and-forget — order is preserved by appendFile's serialization
+          // through the FS, and dropped writes only affect post-mortem logs.
+          appendFile(transcriptPaths.events, line + "\n", "utf-8").catch(() => {});
+        }
         try {
           handleEvent(JSON.parse(line) as OpenCodeEvent);
         } catch {
@@ -169,6 +206,26 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
         stdoutLen: result.stdout.length,
         stderrLen: result.stderr.length,
       });
+      if (transcriptPaths) {
+        // Best-effort write of the per-call summary. resolve() doesn't wait.
+        const summary = {
+          label: opts.transcriptLabel,
+          model: cfg.OPENCODE_MODEL,
+          variant: "low",
+          startedAt: new Date(startedAt).toISOString(),
+          durationMs: result.durationMs,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          taskCompleted: result.taskCompleted,
+          sessionId: result.sessionId,
+          stdoutLen: result.stdout.length,
+          stderrLen: result.stderr.length,
+          resumedSession: opts.sessionId,
+        };
+        writeFile(transcriptPaths.summary, JSON.stringify(summary, null, 2) + "\n", "utf-8").catch(
+          (e) => log.warn("opencode.run: transcript summary write failed", { error: (e as Error).message }),
+        );
+      }
       resolve(result);
     };
 

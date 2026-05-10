@@ -30,8 +30,12 @@ export type GenerateFailure = {
   ok: false;
   sandbox: Sandbox;
   errors: string[];
-  /** Phase where generation broke ("design" | "tasks" | "implement"). */
+  /** Phase where generation broke ("design" | "tasks" | "pick-example" | "implement"). */
   failedPhase?: string;
+  /** Filled in once tasks phase completes. */
+  taskCount?: number;
+  /** Filled in once pick-example phase completes. */
+  examplePick?: { name: string; reason: string };
 };
 
 export type GenerateResult = GenerateSuccess | GenerateFailure;
@@ -124,7 +128,12 @@ async function runDesignPhase(
       attempt === 1
         ? await buildDesignPrompt(idea)
         : await buildRetryPrompt("design", idea, lastErrors, attempt);
-    await runOpenCode({ sandboxDir: sandbox.dir, prompt });
+    await runOpenCode({
+      sandboxDir: sandbox.dir,
+      prompt,
+      transcriptDir: sandbox.transcriptsDir,
+      transcriptLabel: `design-attempt-${attempt}`,
+    });
     const v = await validateDesign(sandbox.dir);
     if (v.ok) {
       log.info("design: success", {
@@ -161,7 +170,12 @@ async function runTasksPhase(
       attempt === 1
         ? await buildTasksPrompt(idea)
         : await buildRetryPrompt("tasks", idea, lastErrors, attempt);
-    await runOpenCode({ sandboxDir: sandbox.dir, prompt });
+    await runOpenCode({
+      sandboxDir: sandbox.dir,
+      prompt,
+      transcriptDir: sandbox.transcriptsDir,
+      transcriptLabel: `tasks-attempt-${attempt}`,
+    });
     const v = await validateTasks(sandbox.dir);
     if (v.ok) {
       const tasks = await parseTasks(sandbox.dir);
@@ -249,7 +263,13 @@ async function runImplementPhase(
         ? await buildImplementFirstPrompt(idea, task, tasks.length, exampleName)
         : await buildImplementNextPrompt(task, taskNum, tasks.length);
 
-    const oc = await runOpenCode({ sandboxDir: sandbox.dir, prompt, sessionId });
+    const oc = await runOpenCode({
+      sandboxDir: sandbox.dir,
+      prompt,
+      sessionId,
+      transcriptDir: sandbox.transcriptsDir,
+      transcriptLabel: `implement-task-${String(taskNum).padStart(2, "0")}`,
+    });
     sessionId = oc.sessionId ?? sessionId;
 
     if (!sessionId) {
@@ -284,6 +304,8 @@ async function runImplementPhase(
         sandboxDir: sandbox.dir,
         prompt: fixPrompt,
         sessionId,
+        transcriptDir: sandbox.transcriptsDir,
+        transcriptLabel: `implement-task-${String(taskNum).padStart(2, "0")}-fix-${iter}`,
       });
       sessionId = ocFix.sessionId ?? sessionId;
     }
@@ -356,7 +378,14 @@ export async function generateGame(idea: GameIdea): Promise<GenerateResult> {
     example.name,
   );
   if (!impl.ok || !impl.meta) {
-    return { ok: false, sandbox, errors: impl.errors, failedPhase: "implement" };
+    return {
+      ok: false,
+      sandbox,
+      errors: impl.errors,
+      failedPhase: "implement",
+      taskCount: tasksOut.tasks.length,
+      examplePick: { name: example.name, reason: example.reason },
+    };
   }
 
   log.info("generate: success", {

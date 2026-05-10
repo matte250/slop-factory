@@ -7,6 +7,7 @@ import { generateGame } from "./generate.ts";
 import { gitOrThrow } from "./git-repo.ts";
 import { takeThumbnail } from "./screenshot.ts";
 import { publishGame } from "./publish.ts";
+import { publishFailureLog } from "./publish-log.ts";
 import { notifyDiscord } from "./notify.ts";
 import { withDeadline } from "./deadline.ts";
 
@@ -59,6 +60,29 @@ export async function runOnce(): Promise<TickResult> {
         failedPhase: gen.failedPhase,
         errors: gen.errors,
       });
+      // Best-effort: publish a failure log if we got far enough to have an
+      // implementation attempt. Failures earlier than implement (e.g. tasks
+      // never produced TASKS.md) aren't interesting enough to bloat the repo.
+      if (gen.failedPhase === "implement") {
+        try {
+          log.phase("publish-failure-log");
+          await withDeadline(
+            "publish-failure-log",
+            120_000,
+            publishFailureLog({
+              idea,
+              sandboxDir: gen.sandbox.dir,
+              sandboxTranscriptsDir: gen.sandbox.transcriptsDir,
+              failedPhase: gen.failedPhase,
+              errors: gen.errors,
+              taskCount: gen.taskCount,
+              examplePick: gen.examplePick,
+            }),
+          );
+        } catch (err) {
+          log.warn("publish-failure-log: failed, continuing", { error: (err as Error).message });
+        }
+      }
       return {
         ok: false,
         error: `generate failed for ${idea.slug} at phase ${gen.failedPhase}: ${gen.errors.join("; ")}`,
