@@ -46,23 +46,27 @@ async function withRetries<T>(
 export async function runOnce(): Promise<TickResult> {
   const start = Date.now();
   try {
+    log.phase("ideate");
     const idea = await ideate();
     log.info("tick: idea picked", { slug: idea.slug, title: idea.title });
 
+    // generate phases (design / tasks / implement) emit their own log.phase banners.
     const gen = await generateGame(idea);
     if (!gen.ok) {
       log.error("tick: generate failed (sandbox preserved for inspection)", {
         slug: idea.slug,
         sandbox: gen.sandbox.dir,
+        failedPhase: gen.failedPhase,
         errors: gen.errors,
       });
       return {
         ok: false,
-        error: `generate failed for ${idea.slug}: ${gen.errors.join("; ")}`,
+        error: `generate failed for ${idea.slug} at phase ${gen.failedPhase}: ${gen.errors.join("; ")}`,
         durationMs: Date.now() - start,
       };
     }
 
+    log.phase("screenshot");
     const thumbnailPath = join(gen.sandbox.dir, "thumbnail.png");
     await withRetries("thumbnail", 3, () =>
       withDeadline(
@@ -72,6 +76,7 @@ export async function runOnce(): Promise<TickResult> {
       ),
     );
 
+    log.phase("publish");
     const pub = await withRetries("publish", 3, () =>
       withDeadline(
         "publish",
@@ -85,6 +90,7 @@ export async function runOnce(): Promise<TickResult> {
       ),
     );
 
+    log.phase("notify");
     const totalMs = Date.now() - start;
     try {
       await withDeadline(
@@ -94,8 +100,7 @@ export async function runOnce(): Promise<TickResult> {
           meta: gen.meta,
           liveUrl: pub.liveUrl,
           thumbnailUrl: pub.thumbnailUrl,
-          shippedAfterStage: gen.shippedAfterStage,
-          totalStages: gen.totalStages,
+          taskCount: gen.taskCount,
           durationMs: totalMs,
         }),
       );
@@ -107,8 +112,7 @@ export async function runOnce(): Promise<TickResult> {
     log.info("tick: success", {
       slug: idea.slug,
       durationMs: totalMs,
-      shippedAfterStage: gen.shippedAfterStage,
-      totalStages: gen.totalStages,
+      taskCount: gen.taskCount,
     });
     return { ok: true, slug: idea.slug, durationMs: totalMs };
   } catch (err) {
@@ -145,6 +149,7 @@ async function bunInstall(cwd: string, timeoutMs: number): Promise<void> {
  * logged but never break the loop — running on stale code beats halting.
  */
 async function selfUpdateAndMaybeExit(): Promise<void> {
+  log.phase("self-update");
   const cwd = process.cwd();
 
   try {

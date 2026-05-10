@@ -12,21 +12,14 @@ const result = await generateGame(idea);
 process.stdout.write(`\n=== generate: ${result.ok ? "PASS" : "FAIL"} ===\n`);
 process.stdout.write(`sandbox: ${result.sandbox.dir}\n`);
 
-process.stdout.write(`\nstage history:\n`);
-for (const s of result.stageHistory) {
-  process.stdout.write(`  stage ${s.stage} (${s.name}): ${s.ok ? "ok" : "fail"} after ${s.attempts} attempts in ${(s.durationMs / 1000).toFixed(1)}s\n`);
-  if (!s.ok) {
-    for (const e of s.errors) process.stdout.write(`    - ${e}\n`);
-  }
-}
-
 if (result.ok) {
-  process.stdout.write(`\nshipped after stage ${result.shippedAfterStage}/${result.totalStages}\n`);
+  process.stdout.write(`\ntasks completed: ${result.taskCount}\n`);
   process.stdout.write(`title: ${result.meta.title}\n`);
   process.stdout.write(`description: ${result.meta.description}\n`);
   process.stdout.write(`controls: ${JSON.stringify(result.meta.controls)}\n`);
 } else {
-  process.stdout.write("\nerrors:\n");
+  process.stdout.write(`\nfailed at phase: ${result.failedPhase ?? "unknown"}\n`);
+  process.stdout.write("errors:\n");
   for (const e of result.errors) process.stdout.write(`  - ${e}\n`);
 }
 

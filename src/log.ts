@@ -21,9 +21,21 @@ function emit(level: Level, msg: string, fields?: Record<string, unknown>) {
   stream.write(PRIORITY[level] + JSON.stringify(line) + "\n");
 }
 
+// ANSI bold green; survives through journald and renders when journalctl is on
+// a terminal. NOTICE priority (<5>) is bold-bright in journalctl, which compounds.
+const ANSI_GREEN_BOLD = "\x1b[1;32m";
+const ANSI_RESET = "\x1b[0m";
+
+function emitPhase(name: string) {
+  const banner = `${ANSI_GREEN_BOLD}════════ PHASE: ${name.toUpperCase()} ════════${ANSI_RESET}`;
+  process.stdout.write(`<5>${banner}\n`);
+}
+
 export const log = {
   debug: (msg: string, fields?: Record<string, unknown>) => emit("debug", msg, fields),
   info: (msg: string, fields?: Record<string, unknown>) => emit("info", msg, fields),
   warn: (msg: string, fields?: Record<string, unknown>) => emit("warn", msg, fields),
   error: (msg: string, fields?: Record<string, unknown>) => emit("error", msg, fields),
+  /** Green-bold banner marking a top-level phase boundary (self-update, ideate, design, tasks, implement, screenshot, publish, notify). */
+  phase: (name: string) => emitPhase(name),
 };

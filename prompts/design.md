@@ -1,39 +1,34 @@
-Read the file CONVENTIONS.md in your working directory carefully before doing anything else.
+Read CONVENTIONS.md in your working directory before doing anything else.
 
-Then design the game described below. Do NOT write any HTML or JS code yet — only the design document.
+Your job in this stage is **game design only**. Do NOT write any HTML or JavaScript code. Do NOT specify pixel coordinates, sprite sizes, or pixels-per-second speeds. The next stage will translate your design into an implementation plan; the stage after that will write the code. Your job here is to describe what the game IS, not how it's built.
 
 Title: {TITLE}
 Concept: {CONCEPT}
 
 Write your design to a file called `DESIGN.md` in the working directory. It MUST contain these sections (use these exact headers; the validator checks for them):
 
-## Player
-- Starting position (e.g. canvas center, bottom edge)
-- Every state variable (position, velocity, rotation, score, lives, …)
-- For each control listed below, what state value it changes
+## Concept
+One or two sentences in your own words. What does the player do, and why is it satisfying?
 
-## Hazards
-- Each hazard type: appearance, where it spawns, when it spawns, how often, how it kills the player
-- Concrete numbers (spawn interval seconds, speeds in px/sec, sizes)
+## Player
+Describe what the player controls — the avatar, ship, cursor, paddle, whatever it is. Visually, what is it (one sentence)? List its verbs (move, jump, shoot, place, type). Keep it abstract — no coordinates, no speeds.
+
+## Core loop
+What happens every 1–3 seconds of normal play. Be specific about the moment-to-moment experience: what's the player reading, what are they choosing between, what makes them lean forward.
+
+## Hazards / Obstacles
+What stands in the player's way. Describe each kind by behavior and threat — "fast horizontal sweepers that telegraph their path", "stationary blocks that explode when shot". Concepts and behaviors, not numbers.
 
 ## Score
-- The discrete event(s) that increase score (e.g. 'survived obstacle', 'collected pickup')
-- Win condition (if any) or 'survival only'
+What discrete events increase the score. Examples: "survived a wave", "collected a pickup", "killed an enemy at long range". Avoid score = elapsed time as the only mechanic.
 
-## Game-over and restart
-- Exact end conditions
-- What state must the restart code path reset (everything)
+## Win and lose
+When does the player win? When do they lose? What happens on screen the moment it ends.
 
-## Mechanic verification
-- Quote the concept verbatim
-- For the primary control, write: 'Press X → state change Y → next frame, collision/score check Z reads Y → outcome W'
-- Be honest. If the concept says 'mirrored gaps', the design must have TWO gaps per obstacle. If it says 'horizontal stretch fits narrow gaps', gaps must be horizontal. Confirm in writing that the design realizes the concept.
+## Feel
+The vibe. Pace (frantic / steady / meditative). Aesthetic direction (neon / pastel / monochrome / retro CRT). Sound character (chiptune / arcade beeps / silent). One short paragraph.
 
-## First 3 seconds (no input simulation)
-- t=0.0s: player at (X, Y). Hazards on screen: [list with positions]
-- t=1.0s: with NO INPUT, player at (X, Y). Hazards at [list]
-- t=2.0s: same
-- t=3.0s: same
-- Verdict: PASS (player still alive at t=3.0s with no input) or FAIL (must redesign — push hazards further away or define a SAFE_RADIUS)
+## Why it's fun
+One sentence. The single moment that would make a player smile, curse, or shout. What is this game's hook?
 
-Keep DESIGN.md focused — the implement stage will read it and turn it into code, so be specific about numbers (px, seconds, sizes) but don't over-elaborate prose. After writing, do not start coding. The implement stage takes over from here.
+Keep DESIGN.md focused on player experience. The next phase (tasks) will translate this into an implementation plan with concrete numbers. After writing DESIGN.md, stop. Do not begin coding or task-listing.

@@ -9,12 +9,12 @@ const Schema = z.object({
   OPENCODE_MODEL: z.string().min(1),
   OPENCODE_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
 
-  // 1 = implement only (~2 min), 2 = +critique pass (default), 3 = +polish pass (~7-10 min)
-  REFINE_STAGES: z.coerce.number().int().min(1).max(5).default(2),
-  // Per-stage retry budget when validation fails
+  // Per-phase retry budget when validation fails (design / tasks). Implement
+  // doesn't use this — it has its own per-task console-fix loop instead.
   STAGE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
-  // Implement-stage inner loop: after each opencode run, load the page and
-  // resume the same session with any console errors found, up to N times.
+  // Per-task inner loop in the implement phase: after each task's opencode
+  // run, load the page and resume the same session with any console errors
+  // found, up to N times before moving to the next task.
   IMPLEMENT_CONSOLE_FIX_ITERATIONS: z.coerce.number().int().min(0).max(10).default(6),
 
   GAMES_REPO_PATH: z.string().min(1),

@@ -19,12 +19,14 @@ export async function validate(sandboxDir: string): Promise<ValidationResult> {
 }
 
 const REQUIRED_DESIGN_SECTIONS = [
+  "## Concept",
   "## Player",
+  "## Core loop",
   "## Hazards",
   "## Score",
-  "## Game-over and restart",
-  "## Mechanic verification",
-  "## First 3 seconds",
+  "## Win and lose",
+  "## Feel",
+  "## Why it's fun",
 ];
 
 export async function validateDesign(sandboxDir: string): Promise<ValidationResult> {
@@ -45,28 +47,42 @@ export async function validateDesign(sandboxDir: string): Promise<ValidationResu
   return { ok: errors.length === 0, errors };
 }
 
-const CRITIQUE_BLOCK_OPEN = "=== CRITIQUE ANALYSIS";
-const CRITIQUE_BLOCK_CLOSE = "=== END CRITIQUE ===";
+export type TaskItem = {
+  num: number;
+  /** Full text of the task line, after the leading `<num>.` */
+  text: string;
+};
+
+const TASK_LINE_RE = /^\s*(\d+)\.\s*(.+?)\s*$/;
+const MIN_TASKS = 5;
 
 /**
- * After the critique stage (and through polish), the index.html must contain
- * the critique's structured analysis as an audit trail. This both proves
- * critique actually ran and gives us something to read when a game still
- * ships broken.
+ * Parse TASKS.md into an ordered list of tasks. A task is any line starting
+ * with `<number>.`. Sub-bullets and prose between tasks are ignored.
  */
-export async function validateWithCritiqueBlock(sandboxDir: string): Promise<ValidationResult> {
-  const r = await validate(sandboxDir);
-  if (!r.ok) return r;
-
-  const html = await readFile(join(sandboxDir, "index.html"), "utf-8");
-  if (!html.includes(CRITIQUE_BLOCK_OPEN) || !html.includes(CRITIQUE_BLOCK_CLOSE)) {
-    return {
-      ok: false,
-      errors: [
-        `index.html: missing critique analysis block. The critique stage must wrap its analysis in a JS comment containing the exact markers "${CRITIQUE_BLOCK_OPEN}" and "${CRITIQUE_BLOCK_CLOSE}", and the polish stage must preserve them.`,
-      ],
-      meta: r.meta,
-    };
+export async function parseTasks(sandboxDir: string): Promise<TaskItem[]> {
+  const raw = await readFile(join(sandboxDir, "TASKS.md"), "utf-8");
+  const items: TaskItem[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(TASK_LINE_RE);
+    if (m) items.push({ num: Number(m[1]), text: m[2]! });
   }
-  return r;
+  return items;
+}
+
+export async function validateTasks(sandboxDir: string): Promise<ValidationResult> {
+  const errors: string[] = [];
+  let items: TaskItem[];
+  try {
+    items = await parseTasks(sandboxDir);
+  } catch {
+    errors.push("Required file missing or unreadable: TASKS.md");
+    return { ok: false, errors };
+  }
+  if (items.length < MIN_TASKS) {
+    errors.push(
+      `TASKS.md: parsed only ${items.length} numbered task line(s); need at least ${MIN_TASKS}. Make sure each task starts with "<number>." at the beginning of its own line.`,
+    );
+  }
+  return { ok: errors.length === 0, errors };
 }

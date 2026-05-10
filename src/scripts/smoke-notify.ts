@@ -8,8 +8,7 @@ await notifyDiscord({
   },
   liveUrl: "https://matte250.github.io/slop-factory-site",
   thumbnailUrl: "https://matte250.github.io/slop-factory-site/games/gravity-flip/thumbnail.png",
-  shippedAfterStage: 3,
-  totalStages: 3,
+  taskCount: 12,
   durationMs: 12345,
 });
 
