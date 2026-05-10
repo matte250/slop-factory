@@ -144,9 +144,16 @@ export async function runPlaytest(page: Page, errors: string[]): Promise<void> {
     }
   }
 
-  if (scoreChanges === 0 && !reachedGameOver) {
-    errors.push(
-      `playtest: in ${PLAY_DURATION_MS / 1000}s of synthetic input (arrow keys, WASD, space), score never changed AND state never reached "gameover". The game has no progress signal — either input doesn't affect the world, or scoring is never wired up. Verify that pressing controls actually moves/scores/dies.`,
-    );
-  }
+  // TEMPORARILY DISABLED — too aggressive; the synthetic key set doesn't
+  // always exercise a game's controls (e.g. typing-style games), so this
+  // produced false-positive failures. Re-enable once the input set is
+  // smarter or the contract carries control hints.
+  //
+  // if (scoreChanges === 0 && !reachedGameOver) {
+  //   errors.push(
+  //     `playtest: in ${PLAY_DURATION_MS / 1000}s of synthetic input (arrow keys, WASD, space), score never changed AND state never reached "gameover". The game has no progress signal — either input doesn't affect the world, or scoring is never wired up. Verify that pressing controls actually moves/scores/dies.`,
+  //   );
+  // }
+  void scoreChanges;
+  void reachedGameOver;
 }
