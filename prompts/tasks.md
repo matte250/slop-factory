@@ -5,7 +5,9 @@ Your job in this stage is to break the implementation into a numbered list of sm
 Title: {TITLE}
 Concept: {CONCEPT}
 
-**You must produce one output file: `TASKS.md` in the working directory.** Use your write/edit tool to create this file on disk. After your turn ends, the validator runs `readFile("TASKS.md")` — if the file does not exist on disk, validation fails and your work is wasted. **Do NOT reply with the task list as inline chat text.** The list must be written to the file. The format MUST be a numbered list, one task per line, each line starting with `<number>.`:
+**You must produce one output file: `TASKS.md` in the working directory.** Use your write/edit tool to create this file on disk. After your turn ends, the validator runs `readFile("TASKS.md")` — if the file does not exist on disk, validation fails and your work is wasted. **Do NOT reply with the task list as inline chat text.** The list must be written to the file.
+
+**Tool calls MUST be emitted as actual function/tool invocations — NOT described or simulated inside your reasoning/analysis text.** Writing tool-shaped JSON like `{"filePath":"TASKS.md","content":"..."}` *inside your chain-of-thought* does NOT invoke any tool. It is just text in the analysis channel that nothing reads or executes. The same goes for `{"pattern":"**/*"}` etc. — those only do something when emitted as a real `tool_use` event from the action channel, never when written into your thinking. Several prior runs have failed by hallucinating tool calls inside reasoning; do not repeat that pattern. If at any point you "describe" a tool call in your thinking instead of invoking it, you must immediately invoke the real tool afterward. The format MUST be a numbered list, one task per line, each line starting with `<number>.`:
 
 ```
 1. <Task title> — <one-sentence description of what to do>
