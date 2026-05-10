@@ -76,6 +76,14 @@ function buildImplementNextPrompt(
   });
 }
 
+/** What file the retry prompt should tell the model to produce. */
+const STAGE_EXPECTED_OUTPUT: Record<"design" | "tasks", string> = {
+  design:
+    "DESIGN.md — a markdown file with the section headers required by the design prompt (## Concept, ## Player, ## Core loop, ## Hazards / Obstacles, ## Score, ## Win and lose, ## Feel, ## Why it's fun).",
+  tasks:
+    "TASKS.md — a numbered list of small implementation tasks, one per line, each line starting with '<number>.' (e.g. '1. HTML scaffold — ...'). At least 5 tasks; aim for 10–15.",
+};
+
 function buildRetryPrompt(
   stageName: "design" | "tasks",
   idea: GameIdea,
@@ -88,6 +96,7 @@ function buildRetryPrompt(
     ERRORS_LIST: errors.map((e) => `- ${e}`).join("\n"),
     TITLE: idea.title,
     CONCEPT: idea.concept,
+    EXPECTED_OUTPUT: STAGE_EXPECTED_OUTPUT[stageName],
   });
 }
 

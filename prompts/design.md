@@ -5,7 +5,9 @@ Your job in this stage is **game design only**. Do NOT write any HTML or JavaScr
 Title: {TITLE}
 Concept: {CONCEPT}
 
-Write your design to a file called `DESIGN.md` in the working directory. It MUST contain these sections (use these exact headers; the validator checks for them):
+**You must produce one output file: `DESIGN.md` in the working directory.** Use your write/edit tool to create this file on disk. After your turn ends, the validator runs `readFile("DESIGN.md")` — if the file does not exist on disk, validation fails and your work is wasted. **Do NOT reply with the design as inline chat text.** The design must be written to the file.
+
+`DESIGN.md` MUST contain these sections (use these exact headers; the validator checks for them):
 
 ## Concept
 One or two sentences in your own words. What does the player do, and why is it satisfying?
@@ -31,4 +33,6 @@ The vibe. Pace (frantic / steady / meditative). Aesthetic direction (neon / past
 ## Why it's fun
 One sentence. The single moment that would make a player smile, curse, or shout. What is this game's hook?
 
-Keep DESIGN.md focused on player experience. The next phase (tasks) will translate this into an implementation plan with concrete numbers. After writing DESIGN.md, stop. Do not begin coding or task-listing.
+Keep DESIGN.md focused on player experience. The next phase (tasks) will translate this into an implementation plan with concrete numbers.
+
+**Final check before you stop**: confirm you actually called your write/edit tool with `DESIGN.md` as the path. If you only described the design in chat without invoking the tool, the file will not exist on disk and validation will fail. After the file is written, stop. Do not begin coding or task-listing.

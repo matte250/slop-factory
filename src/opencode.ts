@@ -35,11 +35,16 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
   //   text, step_finish). Lets us detect actual completion via step_finish/stop.
   // --dangerously-skip-permissions: headless run; no human can answer prompts.
   //   The "danger" is moot since opencode is sandboxed to opts.sandboxDir.
+  // --variant is opencode's provider-specific reasoning-effort flag. For
+  // gpt-oss-120b (OpenAI-compatible) we pin "low" — keeps the model from
+  // burning the output budget on chain-of-thought before it reaches its
+  // tool calls. Documented at https://opencode.ai/docs/cli/.
   const args = [
     "run",
     "--format", "json",
     "--dangerously-skip-permissions",
     "--model", cfg.OPENCODE_MODEL,
+    "--variant", "low",
     "--dir", opts.sandboxDir,
     ...(opts.sessionId ? ["--session", opts.sessionId] : []),
     opts.prompt,

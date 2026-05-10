@@ -10,6 +10,13 @@ export type ChatOptions = {
   maxTokens?: number;
   responseFormat?: "text" | "json_object";
   signal?: AbortSignal;
+  /**
+   * Reasoning effort for reasoning-capable models (like gpt-oss-120b). Lower
+   * values cap how many reasoning tokens the model can spend before producing
+   * its answer — important to keep small structured tasks (ideate,
+   * pick-example) from drowning in chain-of-thought.
+   */
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
 };
 
 export async function chat(
@@ -27,6 +34,10 @@ export async function chat(
   if (opts.maxTokens != null) body.max_tokens = opts.maxTokens;
   if (opts.responseFormat === "json_object") {
     body.response_format = { type: "json_object" };
+  }
+  if (opts.reasoningEffort) {
+    // OpenAI-compatible field; vLLM passes it through to the model.
+    body.reasoning_effort = opts.reasoningEffort;
   }
 
   const res = await fetch(url, {

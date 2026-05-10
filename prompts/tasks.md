@@ -5,7 +5,7 @@ Your job in this stage is to break the implementation into a numbered list of sm
 Title: {TITLE}
 Concept: {CONCEPT}
 
-Write your task list to a file called `TASKS.md` in the working directory. The format MUST be a numbered list, one task per line, each line starting with `<number>.`:
+**You must produce one output file: `TASKS.md` in the working directory.** Use your write/edit tool to create this file on disk. After your turn ends, the validator runs `readFile("TASKS.md")` — if the file does not exist on disk, validation fails and your work is wasted. **Do NOT reply with the task list as inline chat text.** The list must be written to the file. The format MUST be a numbered list, one task per line, each line starting with `<number>.`:
 
 ```
 1. <Task title> — <one-sentence description of what to do>
@@ -42,4 +42,4 @@ Cover at minimum, ordered as below. Add tasks if the design demands more (poweru
 
 You may merge two trivial tasks if they truly belong together (e.g. tasks 1+2 if state is just three lines). You may split a complex task in two. Aim for 10–15 tasks total.
 
-After writing TASKS.md, stop. Do not begin implementation.
+**Final check before you stop**: confirm you actually called your write/edit tool with `TASKS.md` as the path. If you only described the task list in chat without invoking the tool, the file will not exist on disk and validation will fail. After the file is written, stop. Do not begin implementation.
