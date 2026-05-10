@@ -22,32 +22,68 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
       },
+      // Own process group so we can kill helpers (git-remote-https, askpass,
+      // ssh, etc.) on timeout. Without this, SIGTERM to git's PID alone leaves
+      // orphan helpers holding stdio open and 'close' never fires, hanging
+      // the loop indefinitely after the timeout warning logs.
+      detached: true,
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let timedOut = false;
+    let settled = false;
+    let deadman: NodeJS.Timeout | null = null;
+
+    const killTree = (signal: "SIGTERM" | "SIGKILL") => {
+      if (child.pid == null) return;
+      try {
+        process.kill(-child.pid, signal);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ESRCH") {
+          log.warn("git kill failed", { signal, err: String(e) });
+        }
+      }
+    };
+
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (deadman) clearTimeout(deadman);
+      fn();
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      log.warn("git timeout, killing", { cwd, args, timeoutMs });
-      try { child.kill("SIGTERM"); } catch {}
-      setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5_000);
+      log.warn("git timeout, killing process group", { cwd, args, timeoutMs });
+      killTree("SIGTERM");
+      setTimeout(() => killTree("SIGKILL"), 5_000);
+      // If 'close' still doesn't fire (orphan helper keeping stdio open),
+      // force-resolve so the caller can move on instead of hanging forever.
+      deadman = setTimeout(() => {
+        if (!settled) {
+          log.error("git deadman fired after timeout (close never arrived)", { cwd, args });
+          settle(() => reject(new Error(`git ${args.join(" ")} timed out after ${timeoutMs}ms (deadman)`)));
+        }
+      }, 15_000);
     }, timeoutMs);
+
     child.stdout.on("data", (b) => stdout.push(b));
     child.stderr.on("data", (b) => stderr.push(b));
     child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
+      settle(() => reject(err));
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(new Error(`git ${args.join(" ")} timed out after ${timeoutMs}ms`));
-        return;
-      }
-      resolve({
-        exitCode: code ?? -1,
-        stdout: Buffer.concat(stdout).toString("utf-8"),
-        stderr: Buffer.concat(stderr).toString("utf-8"),
+      settle(() => {
+        if (timedOut) {
+          reject(new Error(`git ${args.join(" ")} timed out after ${timeoutMs}ms`));
+          return;
+        }
+        resolve({
+          exitCode: code ?? -1,
+          stdout: Buffer.concat(stdout).toString("utf-8"),
+          stderr: Buffer.concat(stderr).toString("utf-8"),
+        });
       });
     });
   });
