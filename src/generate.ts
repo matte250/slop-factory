@@ -120,6 +120,13 @@ function buildValidateFixPrompt(errors: string[], iter: number, maxIter: number)
   });
 }
 
+function buildFileResumePrompt(file: string, errors: string[]): Promise<string> {
+  return loadPrompt("file-resume", {
+    FILE: file,
+    ERRORS_LIST: errors.map((e) => `- ${e}`).join("\n"),
+  });
+}
+
 // === DESIGN PHASE ========================================================
 
 async function runDesignPhase(
@@ -129,19 +136,33 @@ async function runDesignPhase(
 ): Promise<{ ok: boolean; errors: string[]; attempts: number; durationMs: number }> {
   const startedAt = Date.now();
   let lastErrors: string[] = [];
+  let sessionId: string | undefined = undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log.info("design: attempt starting", { attempt, maxAttempts });
-    const prompt =
-      attempt === 1
-        ? await buildDesignPrompt(idea)
-        : await buildRetryPrompt("design", idea, lastErrors, attempt);
-    await runOpenCode({
+    log.info("design: attempt starting", { attempt, maxAttempts, resumingSession: sessionId });
+    // Attempt 1: full prompt, fresh session.
+    // Attempt 2+: if the previous attempt left an open session, RESUME it with
+    //   a "you forgot to write the file" prompt — gpt-oss is documented to
+    //   recover within an active agentic loop, but loses everything across a
+    //   fresh session. Fall back to the cross-session retry prompt only if
+    //   the prior attempt produced no session id.
+    let prompt: string;
+    if (attempt === 1) {
+      prompt = await buildDesignPrompt(idea);
+    } else if (sessionId) {
+      prompt = await buildFileResumePrompt("DESIGN.md", lastErrors);
+    } else {
+      prompt = await buildRetryPrompt("design", idea, lastErrors, attempt);
+    }
+    const oc = await runOpenCode({
       sandboxDir: sandbox.dir,
       prompt,
+      sessionId,
       transcriptDir: sandbox.transcriptsDir,
       transcriptLabel: `design-attempt-${attempt}`,
     });
+    sessionId = oc.sessionId ?? sessionId;
+
     const v = await validateDesign(sandbox.dir);
     if (v.ok) {
       log.info("design: success", {
@@ -171,19 +192,30 @@ async function runTasksPhase(
 ): Promise<{ ok: boolean; errors: string[]; attempts: number; durationMs: number; tasks?: TaskItem[] }> {
   const startedAt = Date.now();
   let lastErrors: string[] = [];
+  let sessionId: string | undefined = undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log.info("tasks: attempt starting", { attempt, maxAttempts });
-    const prompt =
-      attempt === 1
-        ? await buildTasksPrompt(idea)
-        : await buildRetryPrompt("tasks", idea, lastErrors, attempt);
-    await runOpenCode({
+    log.info("tasks: attempt starting", { attempt, maxAttempts, resumingSession: sessionId });
+    // See runDesignPhase for rationale: resume the same session on retry so
+    // gpt-oss can recover within its active agentic loop instead of losing
+    // all reasoning context to a fresh session.
+    let prompt: string;
+    if (attempt === 1) {
+      prompt = await buildTasksPrompt(idea);
+    } else if (sessionId) {
+      prompt = await buildFileResumePrompt("TASKS.md", lastErrors);
+    } else {
+      prompt = await buildRetryPrompt("tasks", idea, lastErrors, attempt);
+    }
+    const oc = await runOpenCode({
       sandboxDir: sandbox.dir,
       prompt,
+      sessionId,
       transcriptDir: sandbox.transcriptsDir,
       transcriptLabel: `tasks-attempt-${attempt}`,
     });
+    sessionId = oc.sessionId ?? sessionId;
+
     const v = await validateTasks(sandbox.dir);
     if (v.ok) {
       const tasks = await parseTasks(sandbox.dir);
@@ -386,14 +418,14 @@ export async function generateGame(idea: GameIdea): Promise<GenerateResult> {
 
   // ---- Phase: design ----
   log.phase("design");
-  const design = await runDesignPhase(sandbox, idea, Math.min(2, maxAttemptsPerStage));
+  const design = await runDesignPhase(sandbox, idea, Math.min(3, maxAttemptsPerStage));
   if (!design.ok) {
     return { ok: false, sandbox, errors: design.errors, failedPhase: "design" };
   }
 
   // ---- Phase: tasks ----
   log.phase("tasks");
-  const tasksOut = await runTasksPhase(sandbox, idea, Math.min(2, maxAttemptsPerStage));
+  const tasksOut = await runTasksPhase(sandbox, idea, Math.min(3, maxAttemptsPerStage));
   if (!tasksOut.ok || !tasksOut.tasks) {
     return { ok: false, sandbox, errors: tasksOut.errors, failedPhase: "tasks" };
   }
