@@ -1,0 +1,11 @@
+{
+  "title": "Neon Asteroids",
+  "description": "Rotate, thrust, and shoot. Big rocks split into small ones. Get hit and you're gone.",
+  "controls": [
+    "Left/Right (or A/D) to rotate",
+    "Up (or W) to thrust",
+    "Space to fire",
+    "Press R or click Restart"
+  ],
+  "tags": ["arcade", "shooter", "physics"]
+}

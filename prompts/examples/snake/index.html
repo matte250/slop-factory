@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Neon Snake</title>
+  <style>
+    body { margin: 0; background: #0a0a0f; color: #e6e6f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+    .game-header { padding: 12px 16px; border-bottom: 1px solid #1d1d2a; }
+    .game-header h1 { margin: 0; font-size: 18px; color: #7df9ff; }
+    .game-header .game-description { margin: 4px 0; color: #a5a5b8; }
+    .game-header .game-controls { margin: 4px 0; padding-left: 18px; color: #c8c8d8; }
+    main { display: flex; flex-direction: column; align-items: center; padding: 16px; }
+    canvas { background: #0f1320; border: 1px solid #2a2f44; image-rendering: pixelated; }
+    .game-restart { margin-top: 10px; padding: 8px 14px; background: #1c2030; color: #7df9ff; border: 1px solid #2a2f44; cursor: pointer; }
+    .game-restart:hover { background: #232842; }
+  </style>
+</head>
+<body>
+  <header class="game-header">
+    <h1>Neon Snake</h1>
+    <p class="game-description">Eat the food. Don't bite yourself or hit the walls. The snake speeds up as you grow.</p>
+    <ul class="game-controls">
+      <li>Arrow keys or WASD to turn</li>
+      <li>Press R or click Restart</li>
+    </ul>
+  </header>
+  <main>
+    <canvas id="game" width="800" height="600"></canvas>
+    <button id="restart" class="game-restart" type="button">Restart</button>
+  </main>
+  <script>
+  // === CONFIG =============================================================
+  const CELL = 25;
+  const COLS = 32;            // 32 * 25 = 800
+  const ROWS = 24;            // 24 * 25 = 600
+  const TICK_START_MS = 140;  // snake step interval at game start
+  const TICK_MIN_MS = 60;     // floor speed
+  const TICK_SPEEDUP = 3;     // ms shaved off per food eaten
+
+  // === STATE ==============================================================
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const restartBtn = document.getElementById("restart");
+
+  let snake;          // array of { x, y } in grid coords; snake[0] is head
+  let dir;            // { x, y } unit vector
+  let nextDir;        // queued direction (so quick double-taps don't U-turn)
+  let food;           // { x, y } in grid coords
+  let score;
+  let highScore = 0;
+  let stepIntervalMs;
+  let stepAccumulatorMs;
+  let phase;          // "playing" | "gameover"
+  let lastTime;
+  let loopId = null;
+  let audioCtx = null;
+
+  function reset() {
+    snake = [{ x: 10, y: 12 }, { x: 9, y: 12 }, { x: 8, y: 12 }];
+    dir = { x: 1, y: 0 };
+    nextDir = dir;
+    food = randomFreeCell();
+    score = 0;
+    stepIntervalMs = TICK_START_MS;
+    stepAccumulatorMs = 0;
+    phase = "playing";
+    lastTime = performance.now();
+    publishState();
+    startLoop();
+  }
+
+  function startLoop() {
+    if (loopId !== null) cancelAnimationFrame(loopId);
+    function tick(now) {
+      try {
+        const dt = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+        update(dt);
+        render();
+        publishState();
+      } catch (err) {
+        console.error("loop error", err);
+      }
+      loopId = requestAnimationFrame(tick);
+    }
+    loopId = requestAnimationFrame(tick);
+  }
+
+  // === UPDATE =============================================================
+  function update(dt) {
+    if (phase !== "playing") return;
+    stepAccumulatorMs += dt * 1000;
+    while (stepAccumulatorMs >= stepIntervalMs) {
+      stepAccumulatorMs -= stepIntervalMs;
+      step();
+      if (phase !== "playing") return;
+    }
+  }
+
+  function step() {
+    // Commit queued direction; reject reversals.
+    if (nextDir.x !== -dir.x || nextDir.y !== -dir.y) dir = nextDir;
+
+    const head = snake[0];
+    const nx = head.x + dir.x;
+    const ny = head.y + dir.y;
+
+    // Wall collision -> game over.
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) {
+      gameOver();
+      return;
+    }
+    // Self collision (skip last segment because it's about to move).
+    for (let i = 0; i < snake.length - 1; i++) {
+      if (snake[i].x === nx && snake[i].y === ny) {
+        gameOver();
+        return;
+      }
+    }
+
+    snake.unshift({ x: nx, y: ny });
+
+    if (nx === food.x && ny === food.y) {
+      score++;
+      stepIntervalMs = Math.max(TICK_MIN_MS, stepIntervalMs - TICK_SPEEDUP);
+      food = randomFreeCell();
+      beep(660, 0.06);
+    } else {
+      snake.pop();
+    }
+  }
+
+  function gameOver() {
+    phase = "gameover";
+    if (score > highScore) highScore = score;
+    beep(120, 0.18);
+  }
+
+  function randomFreeCell() {
+    while (true) {
+      const c = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+      if (!snake.some((s) => s.x === c.x && s.y === c.y)) return c;
+    }
+  }
+
+  // === RENDER =============================================================
+  function render() {
+    // Background grid.
+    ctx.fillStyle = "#0f1320";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(125,249,255,0.04)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= COLS; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, ROWS * CELL);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * CELL); ctx.lineTo(COLS * CELL, y * CELL);
+      ctx.stroke();
+    }
+
+    // Food (pulsing).
+    const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 180);
+    drawCell(food.x, food.y, `rgba(255,82,174,${pulse.toFixed(3)})`);
+
+    // Snake body.
+    for (let i = snake.length - 1; i >= 1; i--) {
+      drawCell(snake[i].x, snake[i].y, "#52ffae");
+    }
+    // Snake head — brighter so the player tracks it instantly.
+    drawCell(snake[0].x, snake[0].y, "#9dffd1");
+
+    // HUD.
+    ctx.fillStyle = "#e6e6f0";
+    ctx.font = "16px ui-sans-serif, system-ui";
+    ctx.textAlign = "left";
+    ctx.fillText(`Score ${score}`, 12, 22);
+    ctx.textAlign = "right";
+    ctx.fillText(`Best ${highScore}`, canvas.width - 12, 22);
+
+    if (phase === "gameover") {
+      ctx.fillStyle = "rgba(10,10,15,0.7)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#ff52ae";
+      ctx.textAlign = "center";
+      ctx.font = "44px ui-sans-serif, system-ui";
+      ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 20);
+      ctx.fillStyle = "#e6e6f0";
+      ctx.font = "20px ui-sans-serif, system-ui";
+      ctx.fillText(`Final score ${score}` + (score === highScore && score > 0 ? " — new best!" : ""), canvas.width / 2, canvas.height / 2 + 16);
+      ctx.fillStyle = "#a5a5b8";
+      ctx.font = "16px ui-sans-serif, system-ui";
+      ctx.fillText("Press R or click Restart", canvas.width / 2, canvas.height / 2 + 44);
+    }
+  }
+
+  function drawCell(cx, cy, fill) {
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx * CELL + 1, cy * CELL + 1, CELL - 2, CELL - 2);
+  }
+
+  // === INPUT ==============================================================
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "r" || ev.key === "R") { reset(); return; }
+    if (phase !== "playing") return;
+    switch (ev.key) {
+      case "ArrowUp": case "w": case "W": nextDir = { x: 0, y: -1 }; break;
+      case "ArrowDown": case "s": case "S": nextDir = { x: 0, y: 1 }; break;
+      case "ArrowLeft": case "a": case "A": nextDir = { x: -1, y: 0 }; break;
+      case "ArrowRight": case "d": case "D": nextDir = { x: 1, y: 0 }; break;
+    }
+  });
+  restartBtn.addEventListener("click", reset);
+
+  // === AUDIO (lazy) =======================================================
+  function beep(freq, durSec) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durSec);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + durSec);
+    } catch {}
+  }
+
+  // === OBSERVABLE CONTRACT ===============================================
+  function publishState() {
+    const head = snake[0];
+    window.__game = {
+      state: phase,                     // "playing" | "gameover"
+      score,
+      player: {
+        x: head.x * CELL + CELL / 2,    // canvas-space center
+        y: head.y * CELL + CELL / 2,
+        visible: head.x >= 0 && head.x < COLS && head.y >= 0 && head.y < ROWS,
+      },
+      objective: "Eat the pink food. Don't hit the walls or your own tail.",
+    };
+  }
+
+  // === BOOT ===============================================================
+  reset();
+  </script>
+</body>
+</html>
