@@ -112,6 +112,14 @@ function buildConsoleFixPrompt(errors: string[], iter: number, maxIter: number):
   });
 }
 
+function buildValidateFixPrompt(errors: string[], iter: number, maxIter: number): Promise<string> {
+  return loadPrompt("validate-fix", {
+    ERRORS_LIST: errors.map((e) => `- ${e}`).join("\n"),
+    ITERATION: String(iter),
+    MAX_ITERATIONS: String(maxIter),
+  });
+}
+
 // === DESIGN PHASE ========================================================
 
 async function runDesignPhase(
@@ -312,23 +320,55 @@ async function runImplementPhase(
   }
 
   // Final validation: the full validate (static + browser + observable contract + playtest).
-  const v = await validate(sandbox.dir);
-  if (!v.ok || !v.meta) {
-    log.error("implement: final validation failed", { errors: v.errors });
-    return {
-      ok: false,
-      errors: v.errors,
-      durationMs: Date.now() - startedAt,
-    };
+  // Wrap in a same-session fix loop: if validation fails, feed the errors back
+  // into the implement session so the model can fix them in place. This catches
+  // late-emerging issues like blank canvas (rendering wired but never invoked),
+  // controls-list mismatch, hardcoded player.visible, etc. — without throwing
+  // away all the implementation work to start over.
+  let lastValidation: { ok: boolean; errors: string[]; meta?: GameMeta } = { ok: false, errors: [] };
+  for (let iter = 1; iter <= consoleFixIterations; iter++) {
+    const v = await validate(sandbox.dir);
+    lastValidation = v;
+    if (v.ok && v.meta) {
+      if (iter > 1) {
+        log.info("implement: validate-fix loop converged", {
+          taskCount: tasks.length, iterationsUsed: iter - 1,
+        });
+      }
+      log.info("implement: all tasks complete and final validation passed", {
+        taskCount: tasks.length,
+        durationMs: Date.now() - startedAt,
+      });
+      return {
+        ok: true,
+        errors: [],
+        meta: v.meta,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+    if (iter === consoleFixIterations) {
+      log.error("implement: validate-fix budget exhausted, giving up", {
+        errors: v.errors, iterationsUsed: iter,
+      });
+      break;
+    }
+    log.warn("implement: final validation failed, attempting in-session fix", {
+      iter, maxIter: consoleFixIterations, errors: v.errors,
+    });
+    const fixPrompt = await buildValidateFixPrompt(v.errors, iter, consoleFixIterations);
+    const ocFix = await runOpenCode({
+      sandboxDir: sandbox.dir,
+      prompt: fixPrompt,
+      sessionId,
+      transcriptDir: sandbox.transcriptsDir,
+      transcriptLabel: `implement-final-fix-${iter}`,
+    });
+    sessionId = ocFix.sessionId ?? sessionId;
   }
-  log.info("implement: all tasks complete and final validation passed", {
-    taskCount: tasks.length,
-    durationMs: Date.now() - startedAt,
-  });
+
   return {
-    ok: true,
-    errors: [],
-    meta: v.meta,
+    ok: false,
+    errors: lastValidation.errors,
     durationMs: Date.now() - startedAt,
   };
 }

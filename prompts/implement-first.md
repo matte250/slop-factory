@@ -9,6 +9,8 @@ Concept: {CONCEPT}
 
 Use the reference example above as your structural template — section divider banners, the `keys` Set input pattern, the `cancelAnimationFrame` discipline at the top of `startLoop()`, the lazy AudioContext, the `publishState()` call once per frame.
 
+**You must produce two output files in this turn: `index.html` and `meta.json` in the working directory.** Use your write/edit tool to create them on disk. After your turn ends, the validator runs `readFile("index.html")` and `readFile("meta.json")` — if either file does not exist on disk, validation fails and your work is wasted. **Do NOT reply with code as inline chat text.** All output must be written to files via the write tool.
+
 NOW DO TASK 1 OF {TASK_TOTAL}:
 
 {TASK_TEXT}
@@ -17,6 +19,6 @@ NOW DO TASK 1 OF {TASK_TOTAL}:
 - Complete ONLY task 1. Do not start task 2 yet — wait for the next instruction.
 - The game does not need to be playable yet. It just needs to load in a browser without console errors.
 - Keep edits small and focused. The page is reloaded after each task.
-- Edit `index.html` and `meta.json` in place. Do NOT rewrite from scratch on later tasks.
+- For later tasks (2 onward), edit the existing `index.html` / `meta.json` in place — do NOT rewrite from scratch.
 
-After completing task 1, stop and wait for the next instruction.
+**Final check before you stop**: confirm you actually called your write tool to create both `index.html` and `meta.json` on disk. If you only described the code in chat without invoking the tool, the files won't exist and validation will fail. After both files are written, stop and wait for the next instruction.
