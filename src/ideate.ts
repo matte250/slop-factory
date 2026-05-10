@@ -50,7 +50,7 @@ export async function ideate(): Promise<GameIdea> {
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.95, responseFormat: "json_object", reasoningEffort: "low" },
+    { temperature: 0.95, responseFormat: "json_object", reasoningEffort: "high" },
   );
 
   log.debug("ideate: raw reply", { reply: reply.slice(0, 600) });

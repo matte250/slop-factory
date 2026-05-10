@@ -119,7 +119,7 @@ async function attemptPick(
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      { temperature: 0.3, responseFormat: "json_object", reasoningEffort: "low" },
+      { temperature: 0.3, responseFormat: "json_object", reasoningEffort: "high" },
     );
   } catch (e) {
     return { ok: false, reason: `chat failed: ${(e as Error).message}` };
