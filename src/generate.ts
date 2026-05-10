@@ -10,7 +10,7 @@ import {
   validateDesign,
   validateWithCritiqueBlock,
   type ValidationResult,
-} from "./validate.ts";
+} from "./validate/index.ts";
 import { formatExampleForPrompt, loadExampleFor } from "./examples.ts";
 import { loadPrompt } from "./prompts.ts";
 import { log } from "./log.ts";

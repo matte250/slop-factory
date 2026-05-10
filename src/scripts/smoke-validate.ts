@@ -1,4 +1,4 @@
-import { validate } from "../validate.ts";
+import { validate } from "../validate/index.ts";
 import { log } from "../log.ts";
 
 const sandboxDir = process.argv[2];
