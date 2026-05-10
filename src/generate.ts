@@ -1,4 +1,4 @@
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { createSandbox, type Sandbox } from "./sandbox.ts";
@@ -12,7 +12,7 @@ import {
   validateTasks,
   type TaskItem,
 } from "./validate/index.ts";
-import { formatExampleForPrompt, loadExampleFor } from "./examples.ts";
+import { chooseExample, formatExampleForPrompt, loadExample } from "./examples.ts";
 import { loadPrompt } from "./prompts.ts";
 import { log } from "./log.ts";
 import type { GameIdea } from "./ideate.ts";
@@ -50,8 +50,9 @@ async function buildImplementFirstPrompt(
   idea: GameIdea,
   task: TaskItem,
   taskTotal: number,
+  exampleName: string,
 ): Promise<string> {
-  const example = await loadExampleFor(idea);
+  const example = await loadExample(exampleName);
   log.info("implement: injecting reference example", { example: example.name });
   return loadPrompt("implement-first", {
     EXAMPLE_PRELUDE: formatExampleForPrompt(example),
@@ -180,6 +181,39 @@ async function runTasksPhase(
   };
 }
 
+// === PICK-EXAMPLE PHASE ==================================================
+
+/**
+ * Ask the local LLM which reference template best matches the game we're
+ * about to implement. The picker retries internally up to 6 times on
+ * malformed/junk responses; if all attempts fail this throws and the phase
+ * is reported as failed (no keyword-heuristic fallback by design).
+ */
+async function runPickExamplePhase(
+  sandbox: Sandbox,
+  idea: GameIdea,
+): Promise<{ ok: true; name: string; reason: string; attempts: number } | { ok: false; errors: string[] }> {
+  let designContent: string | null = null;
+  try {
+    designContent = await readFile(join(sandbox.dir, "DESIGN.md"), "utf-8");
+  } catch {
+    log.warn("pick-example: no DESIGN.md found, picking from concept alone");
+  }
+  try {
+    const pick = await chooseExample(idea, designContent);
+    log.info("pick-example: chosen", {
+      name: pick.name,
+      reason: pick.reason,
+      attempts: pick.attempts,
+    });
+    return { ok: true, name: pick.name, reason: pick.reason, attempts: pick.attempts };
+  } catch (err) {
+    const e = err as Error;
+    log.error("pick-example: all attempts failed", { error: e.message });
+    return { ok: false, errors: [e.message] };
+  }
+}
+
 // === IMPLEMENT PHASE =====================================================
 
 async function runImplementPhase(
@@ -187,6 +221,7 @@ async function runImplementPhase(
   idea: GameIdea,
   tasks: TaskItem[],
   consoleFixIterations: number,
+  exampleName: string,
 ): Promise<{ ok: boolean; errors: string[]; meta?: GameMeta; durationMs: number }> {
   const startedAt = Date.now();
   let sessionId: string | undefined = undefined;
@@ -202,7 +237,7 @@ async function runImplementPhase(
 
     const prompt =
       i === 0
-        ? await buildImplementFirstPrompt(idea, task, tasks.length)
+        ? await buildImplementFirstPrompt(idea, task, tasks.length, exampleName)
         : await buildImplementNextPrompt(task, taskNum, tasks.length);
 
     const oc = await runOpenCode({ sandboxDir: sandbox.dir, prompt, sessionId });
@@ -292,9 +327,25 @@ export async function generateGame(idea: GameIdea): Promise<GenerateResult> {
     return { ok: false, sandbox, errors: tasksOut.errors, failedPhase: "tasks" };
   }
 
+  // ---- Phase: pick-example ----
+  // The LLM picks the structural template that best matches this game's code
+  // shape. Internally retries up to 6 attempts on malformed responses; if all
+  // attempts fail the phase fails — no keyword fallback by design.
+  log.phase("pick-example");
+  const example = await runPickExamplePhase(sandbox, idea);
+  if (!example.ok) {
+    return { ok: false, sandbox, errors: example.errors, failedPhase: "pick-example" };
+  }
+
   // ---- Phase: implement ----
-  log.phase(`implement (${tasksOut.tasks.length} tasks)`);
-  const impl = await runImplementPhase(sandbox, idea, tasksOut.tasks, consoleFixIterations);
+  log.phase(`implement (${tasksOut.tasks.length} tasks, example: ${example.name})`);
+  const impl = await runImplementPhase(
+    sandbox,
+    idea,
+    tasksOut.tasks,
+    consoleFixIterations,
+    example.name,
+  );
   if (!impl.ok || !impl.meta) {
     return { ok: false, sandbox, errors: impl.errors, failedPhase: "implement" };
   }
