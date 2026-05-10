@@ -50,12 +50,17 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
   // gpt-oss-120b (OpenAI-compatible) we pin "high" — quality over speed for
   // the structured-output stages (design, tasks, implement). Documented at
   // https://opencode.ai/docs/cli/.
+  // --thinking emits the model's chain-of-thought as `type: "reasoning"`
+  // events alongside the tool-use stream. Without it, reasoning content
+  // is invisible to --format json (we see only step envelopes + tool calls).
+  // Confirmed empirically against vllm/gpt-oss-120b.
   const args = [
     "run",
     "--format", "json",
     "--dangerously-skip-permissions",
     "--model", cfg.OPENCODE_MODEL,
     "--variant", "high",
+    "--thinking",
     "--dir", opts.sandboxDir,
     ...(opts.sessionId ? ["--session", opts.sessionId] : []),
     opts.prompt,
@@ -76,9 +81,11 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
           events: join(opts.transcriptDir, `${opts.transcriptLabel}.events.jsonl`),
           summary: join(opts.transcriptDir, `${opts.transcriptLabel}.summary.json`),
           // Concatenated `text` events — what the model literally said in chat,
-          // separate from tool calls. This is the field to look at when
-          // debugging "why did the model not write a file?".
+          // separate from tool calls.
           text: join(opts.transcriptDir, `${opts.transcriptLabel}.text.txt`),
+          // Concatenated `reasoning` events — the model's chain-of-thought.
+          // Only populated when opencode is invoked with --thinking.
+          reasoning: join(opts.transcriptDir, `${opts.transcriptLabel}.reasoning.txt`),
         }
       : null;
 
@@ -87,8 +94,9 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
     // disk error to take down the actual opencode run.
     try {
       await writeFile(transcriptPaths.prompt, opts.prompt, "utf-8");
-      await writeFile(transcriptPaths.events, "", "utf-8"); // truncate
-      await writeFile(transcriptPaths.text, "", "utf-8");   // truncate
+      await writeFile(transcriptPaths.events, "", "utf-8");    // truncate
+      await writeFile(transcriptPaths.text, "", "utf-8");      // truncate
+      await writeFile(transcriptPaths.reasoning, "", "utf-8"); // truncate
     } catch (e) {
       log.warn("opencode.run: transcript pre-write failed", { error: (e as Error).message });
     }
@@ -180,6 +188,17 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
             parsed.part.text.length > 0
           ) {
             appendFile(transcriptPaths.text, parsed.part.text, "utf-8").catch(() => {});
+          }
+          // Capture chain-of-thought reasoning (only present when --thinking
+          // is passed; we always pass it). Separate file so reasoning doesn't
+          // pollute the chat-text view.
+          if (
+            transcriptPaths &&
+            parsed.type === "reasoning" &&
+            typeof parsed.part?.text === "string" &&
+            parsed.part.text.length > 0
+          ) {
+            appendFile(transcriptPaths.reasoning, parsed.part.text + "\n\n---\n\n", "utf-8").catch(() => {});
           }
           handleEvent(parsed);
         }

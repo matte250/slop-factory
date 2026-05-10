@@ -46,6 +46,14 @@ export function describeEvent(
     }
     case "text":
       return { msg: "opencode step.text", fields: { preview: ev.part?.text?.slice(0, 200) } };
+    case "reasoning":
+      return {
+        msg: "opencode step.reasoning",
+        fields: {
+          chars: ev.part?.text?.length ?? 0,
+          preview: ev.part?.text?.slice(0, 200),
+        },
+      };
     case "step_finish":
       return {
         msg: "opencode step.finish",

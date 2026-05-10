@@ -186,6 +186,8 @@ type TranscriptEntry = {
   summaryFile?: string;
   /** Concatenated `text` events — what the model literally said in chat. */
   textFile?: string;
+  /** Concatenated `reasoning` events — the model's chain-of-thought. */
+  reasoningFile?: string;
 };
 
 async function copyTranscripts(
@@ -207,9 +209,12 @@ async function copyTranscripts(
   for (const name of entries) {
     let label: string | null = null;
     let kind: keyof TranscriptEntry | null = null;
-    // Order matters: ".text.txt" must be checked before ".prompt.txt" since
-    // both end in ".txt", but the suffixes differ.
-    if (name.endsWith(".text.txt")) {
+    // Order matters: ".text.txt" / ".reasoning.txt" must be checked before
+    // ".prompt.txt" since they all end in ".txt".
+    if (name.endsWith(".reasoning.txt")) {
+      label = name.slice(0, -".reasoning.txt".length);
+      kind = "reasoningFile";
+    } else if (name.endsWith(".text.txt")) {
       label = name.slice(0, -".text.txt".length);
       kind = "textFile";
     } else if (name.endsWith(".prompt.txt")) {
@@ -440,12 +445,20 @@ async function renderTranscripts(transcripts: TranscriptEntry[], transcriptsDir:
     const prompt = t.promptFile ? await readSafe(join(transcriptsDir, t.promptFile)) : null;
     const events = t.eventsFile ? await readSafe(join(transcriptsDir, t.eventsFile)) : null;
     const text = t.textFile ? await readSafe(join(transcriptsDir, t.textFile)) : null;
+    const reasoning = t.reasoningFile ? await readSafe(join(transcriptsDir, t.reasoningFile)) : null;
     const hasText = text != null && text.length > 0;
+    const hasReasoning = reasoning != null && reasoning.length > 0;
+    const summaryNote = hasText
+      ? ""
+      : hasReasoning
+        ? ' <span style="color:#a5a5b8;font-size:11px">(reasoning only — no chat text)</span>'
+        : ' <span style="color:#a5a5b8;font-size:11px">(no chat text — only tool calls)</span>';
     blocks.push(`
-<details${hasText ? " open" : ""}>
-  <summary>${escapeHtml(t.label)}${hasText ? "" : " <span style=\"color:#a5a5b8;font-size:11px\">(no chat text — only tool calls)</span>"}</summary>
+<details${(hasText || hasReasoning) ? " open" : ""}>
+  <summary>${escapeHtml(t.label)}${summaryNote}</summary>
   ${summary ? `<pre>${escapeHtml(summary)}</pre>` : ""}
   ${hasText ? `<div style="margin:8px 0;color:#a5a5b8;font-size:11px;text-transform:uppercase;letter-spacing:0.08em">Model output (chat text)</div><pre style="background:#0f1320;border-color:#3a4a64;color:#9dffd1">${escapeHtml(text!)}</pre>` : ""}
+  ${hasReasoning ? `<details><summary>chain-of-thought / reasoning (${reasoning!.length.toLocaleString()} chars)</summary><pre style="background:#15101c;border-color:#3a2a4a;color:#d8c8ff">${escapeHtml(reasoning!)}</pre></details>` : ""}
   ${prompt ? `<details><summary>prompt (${prompt.length.toLocaleString()} chars)</summary><pre>${escapeHtml(prompt)}</pre></details>` : ""}
   ${events ? `<details><summary>raw events (${events.split("\n").length - 1} lines)</summary><pre>${escapeHtml(events)}</pre></details>` : ""}
 </details>`);
