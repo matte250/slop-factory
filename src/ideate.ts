@@ -1,38 +1,74 @@
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { z } from "zod";
+import { chat } from "./llm.ts";
 import { log } from "./log.ts";
-import { runOpenCode } from "./opencode.ts";
-import type { Sandbox } from "./sandbox.ts";
+import { readGamesIndex, uniqueSlug, type GameIndexEntry } from "./games-index.ts";
 
 export type GameIdea = {
-  /** Raw IDEA.md contents — used for downstream prompts and failure logs. */
+  title: string;
+  slug: string;
   concept: string;
 };
 
-const IDEATE_PROMPT =
-  "Come up with a random game idea that is possible to create in a HTML canvas. " +
-  "Save the idea to a IDEA.md file in this working directory. " +
-  "The game should have a lose condition. Be concice.";
+const IdeaSchema = z.object({
+  title: z.string().min(3).max(80),
+  concept: z.string().min(20).max(600),
+});
 
-export async function ideate(sandbox: Sandbox): Promise<GameIdea> {
-  await runOpenCode({
-    sandboxDir: sandbox.dir,
-    prompt: IDEATE_PROMPT,
-    variant: "high",
-    transcriptDir: sandbox.transcriptsDir,
-    transcriptLabel: "ideate",
-  });
+const IdeasResponseSchema = z.object({
+  ideas: z.array(IdeaSchema).min(1),
+});
 
-  const ideaPath = join(sandbox.dir, "IDEA.md");
+function summarizeExisting(existing: GameIndexEntry[]): string {
+  if (existing.length === 0) return "(none yet — this is the very first game)";
+  return existing
+    .slice(0, 30)
+    .map((g) => `- "${g.title}": ${g.description}`)
+    .join("\n");
+}
+
+export async function ideate(): Promise<GameIdea> {
+  const existing = await readGamesIndex();
+  log.info("ideate: existing games", { count: existing.length });
+
+  const system = [
+    "You are brainstorming for the Slop Factory, a continuously-updating gallery of tiny canvas-based browser games.",
+    "Each game is a single self-contained HTML file rendering on a <canvas>.",
+    "Good ideas are: a clear single gameplay loop, doable as a small canvas game, mechanically distinct from prior entries.",
+    "Avoid: anything requiring assets, anything multiplayer, anything needing network calls, anything with text-heavy UI.",
+    "Respond with JSON only. No prose, no markdown fences. Structure: { \"ideas\": [{\"title\": string, \"concept\": string}, ...] }.",
+  ].join(" ");
+
+  const user = [
+    "Existing games in the gallery (do not thematically duplicate any of these):",
+    summarizeExisting(existing),
+    "",
+    "Brainstorm 3 distinct fresh ideas. For each: a 2-5 word title and a 1-2 sentence concept describing the core gameplay loop.",
+  ].join("\n");
+
+  const reply = await chat(
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    { temperature: 0.95, responseFormat: "json_object", reasoningEffort: "high" },
+  );
+
+  log.debug("ideate: raw reply", { reply: reply.slice(0, 600) });
+
+  let json: unknown;
   try {
-    await stat(ideaPath);
-  } catch {
-    throw new Error("ideate: IDEA.md was not created by opencode");
+    json = JSON.parse(reply);
+  } catch (e) {
+    throw new Error(`ideate: model did not return JSON: ${(e as Error).message}\n--- reply ---\n${reply.slice(0, 600)}`);
   }
-  const concept = (await readFile(ideaPath, "utf-8")).trim();
-  if (concept.length === 0) {
-    throw new Error("ideate: IDEA.md is empty");
+  const parsed = IdeasResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(`ideate: response did not match schema: ${parsed.error.message}\n--- reply ---\n${reply.slice(0, 600)}`);
   }
-  log.info("ideate: IDEA.md written", { bytes: concept.length });
-  return { concept };
+
+  const picked = parsed.data.ideas[0]!;
+  const slug = uniqueSlug(picked.title, existing);
+  const idea: GameIdea = { title: picked.title, slug, concept: picked.concept };
+  log.info("ideate: picked", { idea });
+  return idea;
 }

@@ -30,6 +30,7 @@ export async function publishGame(input: PublishInput): Promise<PublishResult> {
   await mkdir(gamesDir, { recursive: true });
 
   await copyFile(join(input.sandboxDir, "index.html"), join(gamesDir, "index.html"));
+  await copyFile(join(input.sandboxDir, "game.js"), join(gamesDir, "game.js"));
   await copyFile(join(input.sandboxDir, "meta.json"), join(gamesDir, "meta.json"));
   await copyFile(input.thumbnailPath, join(gamesDir, "thumbnail.png"));
 

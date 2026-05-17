@@ -5,12 +5,8 @@ import type { Sandbox } from "./sandbox.ts";
 import { runOpenCode } from "./opencode.ts";
 import { validate } from "./validate/index.ts";
 import { log } from "./log.ts";
-import {
-  GameMetaSchema,
-  readGamesIndex,
-  uniqueSlug,
-  type GameMeta,
-} from "./games-index.ts";
+import { GameMetaSchema, type GameMeta } from "./games-index.ts";
+import type { GameIdea } from "./ideate.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const INDEX_TEMPLATE_PATH = join(here, "..", "prompts", "index.html.tmpl");
@@ -30,6 +26,7 @@ const EXTRACT_META_PROMPT = [
   "Output only the file. No markdown fences inside the file.",
 ].join("\n");
 
+const IMPLEMENT_MAX_ATTEMPTS = 3;
 const EXTRACT_META_MAX_ATTEMPTS = 3;
 const VALIDATE_FIX_MAX_ATTEMPTS = 2;
 
@@ -139,17 +136,48 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 async function runImplement(sandbox: Sandbox): Promise<{ ok: boolean; errors: string[] }> {
-  await runOpenCode({
-    sandboxDir: sandbox.dir,
-    prompt: IMPLEMENT_PROMPT,
-    variant: "medium",
-    transcriptDir: sandbox.transcriptsDir,
-    transcriptLabel: "implement",
-  });
-  if (!(await fileExists(join(sandbox.dir, "game.js")))) {
-    return { ok: false, errors: ["implement: game.js was not created by opencode"] };
+  let sessionId: string | undefined = undefined;
+
+  for (let attempt = 1; attempt <= IMPLEMENT_MAX_ATTEMPTS; attempt++) {
+    log.info("implement: attempt starting", {
+      attempt,
+      maxAttempts: IMPLEMENT_MAX_ATTEMPTS,
+      resumingSession: sessionId,
+    });
+
+    // First attempt: full prompt, fresh session.
+    // Retry attempts: resume the same session with a corrective nudge — gpt-oss
+    // recovers within an active loop but loses context across a fresh session.
+    const prompt =
+      attempt === 1
+        ? IMPLEMENT_PROMPT
+        : [
+            "You did not create a game.js file. Please write it now using the file-write tool.",
+            "Do not output the code as chat text — use the tool call to write game.js to the working directory.",
+            'Reminder: the canvas in the HTML has id="game".',
+          ].join("\n");
+
+    const oc = await runOpenCode({
+      sandboxDir: sandbox.dir,
+      prompt,
+      sessionId,
+      variant: "medium",
+      transcriptDir: sandbox.transcriptsDir,
+      transcriptLabel: `implement-attempt-${attempt}`,
+    });
+    sessionId = oc.sessionId ?? sessionId;
+
+    if (await fileExists(join(sandbox.dir, "game.js"))) {
+      if (attempt > 1) log.info("implement: recovered on retry", { attempt });
+      return { ok: true, errors: [] };
+    }
+    log.warn("implement: attempt failed", { attempt, reason: "game.js not created" });
   }
-  return { ok: true, errors: [] };
+
+  return {
+    ok: false,
+    errors: [`implement: game.js was not created after ${IMPLEMENT_MAX_ATTEMPTS} attempts`],
+  };
 }
 
 /**
@@ -256,7 +284,15 @@ async function materialize(sandbox: Sandbox, meta: GameMeta): Promise<void> {
   });
 }
 
-export async function generateGame(sandbox: Sandbox): Promise<GenerateResult> {
+export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<GenerateResult> {
+  // Drop the idea into the sandbox so opencode's @IDEA.md references resolve.
+  await writeFile(
+    join(sandbox.dir, "IDEA.md"),
+    `# ${idea.title}\n\n${idea.concept}\n`,
+    "utf-8",
+  );
+  log.info("generate: wrote IDEA.md", { title: idea.title, slug: idea.slug });
+
   // ---- Phase: implement ----
   log.phase("implement");
   const impl = await runImplement(sandbox);
@@ -265,23 +301,27 @@ export async function generateGame(sandbox: Sandbox): Promise<GenerateResult> {
   }
 
   // ---- Phase: extract-meta ----
+  // The extracted META.json gives us description + controls. We override
+  // title with the one ideate picked, since that's what idea.slug was
+  // de-duped against.
   log.phase("extract-meta");
   const meta = await runExtractMeta(sandbox);
   if (!meta.ok) {
     return { ok: false, sandbox, errors: meta.errors, failedPhase: "extract-meta" };
   }
+  const finalMeta: GameMeta = { ...meta.meta, title: idea.title };
 
   // ---- Phase: materialize ----
   log.phase("materialize");
   try {
-    await materialize(sandbox, meta.meta);
+    await materialize(sandbox, finalMeta);
   } catch (e) {
     return {
       ok: false,
       sandbox,
       errors: [`materialize: ${(e as Error).message}`],
       failedPhase: "materialize",
-      meta: meta.meta,
+      meta: finalMeta,
     };
   }
 
@@ -313,14 +353,10 @@ export async function generateGame(sandbox: Sandbox): Promise<GenerateResult> {
       sandbox,
       errors: lastValidate.errors,
       failedPhase: "validate",
-      meta: meta.meta,
+      meta: finalMeta,
     };
   }
 
-  // Slug is decided here, after we know the title.
-  const existing = await readGamesIndex();
-  const slug = uniqueSlug(meta.meta.title, existing);
-
-  log.info("generate: success", { slug, title: meta.meta.title });
-  return { ok: true, sandbox, meta: meta.meta, slug };
+  log.info("generate: success", { slug: idea.slug, title: finalMeta.title });
+  return { ok: true, sandbox, meta: finalMeta, slug: idea.slug };
 }
