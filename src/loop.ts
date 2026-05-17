@@ -55,10 +55,8 @@ export async function runOnce(): Promise<TickResult> {
 
   try {
     log.phase("ideate");
-    let idea;
     try {
-      idea = await ideate();
-      log.info("tick: idea picked", { slug: idea.slug, title: idea.title });
+      await ideate(sandbox);
     } catch (err) {
       const e = err as Error;
       log.error("tick: ideate failed (sandbox preserved for inspection)", {
@@ -88,7 +86,7 @@ export async function runOnce(): Promise<TickResult> {
       };
     }
 
-    const gen = await generateGame(sandbox, idea);
+    const gen = await generateGame(sandbox);
     if (!gen.ok) {
       log.error("tick: generate failed (sandbox preserved for inspection)", {
         sandbox: gen.sandbox.dir,

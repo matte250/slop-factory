@@ -5,8 +5,12 @@ import type { Sandbox } from "./sandbox.ts";
 import { runOpenCode } from "./opencode.ts";
 import { validate } from "./validate/index.ts";
 import { log } from "./log.ts";
-import { GameMetaSchema, type GameMeta } from "./games-index.ts";
-import type { GameIdea } from "./ideate.ts";
+import {
+  GameMetaSchema,
+  readGamesIndex,
+  uniqueSlug,
+  type GameMeta,
+} from "./games-index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const INDEX_TEMPLATE_PATH = join(here, "..", "prompts", "index.html.tmpl");
@@ -322,16 +326,9 @@ async function materialize(sandbox: Sandbox, meta: GameMeta): Promise<void> {
   });
 }
 
-export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<GenerateResult> {
-  // Drop the idea into the sandbox so opencode's @IDEA.md references resolve.
-  await writeFile(
-    join(sandbox.dir, "IDEA.md"),
-    `# ${idea.title}\n\n${idea.concept}\n`,
-    "utf-8",
-  );
-  log.info("generate: wrote IDEA.md", { title: idea.title, slug: idea.slug });
-
+export async function generateGame(sandbox: Sandbox): Promise<GenerateResult> {
   // ---- Phase: implement ----
+  // ideate() has already written IDEA.md into the sandbox.
   log.phase("implement");
   const impl = await runImplement(sandbox);
   if (!impl.ok) {
@@ -347,27 +344,24 @@ export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<Ge
   await runAddSounds(sandbox, afterGraphicsSession);
 
   // ---- Phase: extract-meta ----
-  // The extracted META.json gives us description + controls. We override
-  // title with the one ideate picked, since that's what idea.slug was
-  // de-duped against.
+  // Gives us title + description + controls extracted from IDEA.md + game.js.
   log.phase("extract-meta");
   const meta = await runExtractMeta(sandbox);
   if (!meta.ok) {
     return { ok: false, sandbox, errors: meta.errors, failedPhase: "extract-meta" };
   }
-  const finalMeta: GameMeta = { ...meta.meta, title: idea.title };
 
   // ---- Phase: materialize ----
   log.phase("materialize");
   try {
-    await materialize(sandbox, finalMeta);
+    await materialize(sandbox, meta.meta);
   } catch (e) {
     return {
       ok: false,
       sandbox,
       errors: [`materialize: ${(e as Error).message}`],
       failedPhase: "materialize",
-      meta: finalMeta,
+      meta: meta.meta,
     };
   }
 
@@ -399,10 +393,14 @@ export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<Ge
       sandbox,
       errors: lastValidate.errors,
       failedPhase: "validate",
-      meta: finalMeta,
+      meta: meta.meta,
     };
   }
 
-  log.info("generate: success", { slug: idea.slug, title: finalMeta.title });
-  return { ok: true, sandbox, meta: finalMeta, slug: idea.slug };
+  // Slug is decided here, after we know the title from extract-meta.
+  const existing = await readGamesIndex();
+  const slug = uniqueSlug(meta.meta.title, existing);
+
+  log.info("generate: success", { slug, title: meta.meta.title });
+  return { ok: true, sandbox, meta: meta.meta, slug };
 }
