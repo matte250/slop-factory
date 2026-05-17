@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withDeadline } from "../deadline.ts";
 import { log } from "../log.ts";
-import { runPlaytest } from "./playtest.ts";
 import type { ValidationResult } from "./types.ts";
 
 export type BrowserCheckOptions = {
@@ -10,56 +9,15 @@ export type BrowserCheckOptions = {
   watchMs?: number;
 };
 
-/**
- * Fast-path browser load that captures only runtime errors. Used by the
- * implement-stage console-fix iteration loop where running the full
- * browserChecks (with playtest) per iteration would be wasteful.
- */
-export async function consoleErrorCheck(
-  sandboxDir: string,
-  watchMs = 3_000,
-): Promise<string[]> {
-  const errors: string[] = [];
-  const { chromium } = await import("playwright-core");
-  const browser = await withDeadline(
-    "consoleCheck.launch",
-    15_000,
-    chromium.launch({ headless: true, timeout: 15_000 }),
-  );
-  try {
-    return await withDeadline("consoleCheck.run", 25_000, (async (): Promise<string[]> => {
-      const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
-      const page = await context.newPage();
-      page.setDefaultTimeout(10_000);
-      page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));
-      page.on("console", (msg) => {
-        if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`);
-      });
-      const url = pathToFileURL(join(sandboxDir, "index.html")).href;
-      try {
-        await page.goto(url, { waitUntil: "load", timeout: 10_000 });
-      } catch (e) {
-        errors.push(`failed to load page: ${(e as Error).message}`);
-        return errors;
-      }
-      await page.waitForTimeout(watchMs);
-      return errors;
-    })());
-  } catch (e) {
-    errors.push(`consoleCheck failed: ${(e as Error).message}`);
-    return errors;
-  } finally {
-    try {
-      await withDeadline("consoleCheck.close", 5_000, browser.close());
-    } catch (e) {
-      log.warn("consoleCheck: browser.close timed out / failed", { error: (e as Error).message });
-    }
-  }
-}
+const PLAYTEST_KEYS = [
+  "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+  "Space", "KeyW", "KeyA", "KeyS", "KeyD",
+];
+const PLAY_DURATION_MS = 5_000;
+const KEY_INTERVAL_MS = 250;
 
 export async function browserChecks(opts: BrowserCheckOptions): Promise<ValidationResult> {
-  // watchMs is the post-load init window before playtest begins. Kept short
-  // because the playtest itself watches for ~8s on top.
+  // watchMs is the post-load init window before synthetic input begins.
   const watchMs = opts.watchMs ?? 2_000;
   const errors: string[] = [];
 
@@ -76,7 +34,7 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
     // sync loop, wedged WebAudio init, etc.) won't be cancelled by this
     // racing — but the finally below force-closes the browser, killing any
     // stuck script.
-    return await withDeadline("validate.browser", 45_000, (async (): Promise<ValidationResult> => {
+    return await withDeadline("validate.browser", 30_000, (async (): Promise<ValidationResult> => {
       const context = await browser.newContext({ viewport: { width: 900, height: 700 } });
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
@@ -96,8 +54,8 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
         return { ok: false, errors };
       }
 
-      // Short post-load init window so the game can wire up window.__game and
-      // start its RAF loop before we begin probing.
+      // Short post-load init window so the game can start its RAF loop before
+      // we begin probing.
       await page.waitForTimeout(watchMs);
 
       // page.evaluate can hang if the page's JS thread is busy in an infinite
@@ -133,14 +91,23 @@ export async function browserChecks(opts: BrowserCheckOptions): Promise<Validati
         errors.push("canvas: appears blank (only one color) after watch window — game may not be drawing");
       }
 
-      // Bail before playtest if there's already a fatal error — playtest
-      // results would be noise on top of an already-broken page.
+      // Bail before synthetic input if there's already a fatal error — further
+      // input would only generate noise.
       if (errors.length > 0) return { ok: false, errors };
 
-      try {
-        await runPlaytest(page, errors);
-      } catch (e) {
-        errors.push(`playtest harness threw: ${(e as Error).message}`);
+      // Fire synthetic keys at the page and watch for pageerror / console.error
+      // throughout. The listeners above already accumulate into `errors`.
+      const startedAt = Date.now();
+      let keyIdx = 0;
+      while (Date.now() - startedAt < PLAY_DURATION_MS) {
+        const key = PLAYTEST_KEYS[keyIdx % PLAYTEST_KEYS.length]!;
+        keyIdx++;
+        try {
+          await page.keyboard.press(key);
+        } catch {
+          // page may have navigated/crashed — caught by listeners
+        }
+        await page.waitForTimeout(KEY_INTERVAL_MS);
       }
 
       return { ok: errors.length === 0, errors };

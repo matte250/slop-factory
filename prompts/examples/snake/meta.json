@@ -1,9 +1,0 @@
-{
-  "title": "Neon Snake",
-  "description": "Eat the food. Don't bite yourself or hit the walls. The snake speeds up as you grow.",
-  "controls": [
-    "Arrow keys or WASD to turn",
-    "Press R or click Restart"
-  ],
-  "tags": ["arcade", "snake", "grid"]
-}

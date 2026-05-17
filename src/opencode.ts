@@ -17,6 +17,12 @@ export type OpenCodeRunOptions = {
   /** If set, resume this opencode session instead of starting a fresh one. */
   sessionId?: string;
   /**
+   * Reasoning-effort flag forwarded to opencode via `--variant`. Defaults to
+   * "high" so existing callers don't change behavior; lighter phases pass
+   * "medium" or "low" to spend fewer reasoning tokens.
+   */
+  variant?: "high" | "medium" | "low";
+  /**
    * If set together with `transcriptLabel`, runOpenCode writes:
    *   <transcriptDir>/<label>.prompt.txt   — the exact prompt sent
    *   <transcriptDir>/<label>.events.jsonl — every JSON event opencode emitted
@@ -46,20 +52,20 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
   //   text, step_finish). Lets us detect actual completion via step_finish/stop.
   // --dangerously-skip-permissions: headless run; no human can answer prompts.
   //   The "danger" is moot since opencode is sandboxed to opts.sandboxDir.
-  // --variant is opencode's provider-specific reasoning-effort flag. For
-  // gpt-oss-120b (OpenAI-compatible) we pin "high" — quality over speed for
-  // the structured-output stages (design, tasks, implement). Documented at
-  // https://opencode.ai/docs/cli/.
+  // --variant is opencode's provider-specific reasoning-effort flag for
+  // gpt-oss-120b (OpenAI-compatible). Caller picks high/medium/low per phase.
+  // Documented at https://opencode.ai/docs/cli/.
   // --thinking emits the model's chain-of-thought as `type: "reasoning"`
   // events alongside the tool-use stream. Without it, reasoning content
   // is invisible to --format json (we see only step envelopes + tool calls).
   // Confirmed empirically against vllm/gpt-oss-120b.
+  const variant = opts.variant ?? "high";
   const args = [
     "run",
     "--format", "json",
     "--dangerously-skip-permissions",
     "--model", cfg.OPENCODE_MODEL,
-    "--variant", "high",
+    "--variant", variant,
     "--thinking",
     "--dir", opts.sandboxDir,
     ...(opts.sessionId ? ["--session", opts.sessionId] : []),
@@ -250,7 +256,7 @@ export async function runOpenCode(opts: OpenCodeRunOptions): Promise<OpenCodeRun
         const summary = {
           label: opts.transcriptLabel,
           model: cfg.OPENCODE_MODEL,
-          variant: "high",
+          variant,
           startedAt: new Date(startedAt).toISOString(),
           durationMs: result.durationMs,
           exitCode: result.exitCode,

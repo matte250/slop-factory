@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { log } from "./log.ts";
@@ -9,6 +10,7 @@ import { takeThumbnail } from "./screenshot.ts";
 import { publishGame } from "./publish.ts";
 import { publishFailureLog } from "./publish-log.ts";
 import { notifyDiscord } from "./notify.ts";
+import { createSandbox } from "./sandbox.ts";
 import { withDeadline } from "./deadline.ts";
 
 export type TickResult =
@@ -46,47 +48,71 @@ async function withRetries<T>(
 
 export async function runOnce(): Promise<TickResult> {
   const start = Date.now();
+  // Slug is decided post-ideate, so the sandbox uses a random temp name.
+  const tempSlug = `tick-${randomBytes(4).toString("hex")}`;
+  const sandbox = await createSandbox(tempSlug);
+  log.info("tick: sandbox created", { dir: sandbox.dir });
+
   try {
     log.phase("ideate");
-    const idea = await ideate();
-    log.info("tick: idea picked", { slug: idea.slug, title: idea.title });
+    try {
+      await ideate(sandbox);
+    } catch (err) {
+      const e = err as Error;
+      log.error("tick: ideate failed (sandbox preserved for inspection)", {
+        sandbox: sandbox.dir,
+        error: e.message,
+      });
+      try {
+        log.phase("publish-failure-log");
+        await withDeadline(
+          "publish-failure-log",
+          120_000,
+          publishFailureLog({
+            tempSlug,
+            sandboxDir: sandbox.dir,
+            sandboxTranscriptsDir: sandbox.transcriptsDir,
+            failedPhase: "ideate",
+            errors: [e.message],
+          }),
+        );
+      } catch (err2) {
+        log.warn("publish-failure-log: failed, continuing", { error: (err2 as Error).message });
+      }
+      return {
+        ok: false,
+        error: `ideate failed: ${e.message}`,
+        durationMs: Date.now() - start,
+      };
+    }
 
-    // generate phases (design / tasks / implement) emit their own log.phase banners.
-    const gen = await generateGame(idea);
+    const gen = await generateGame(sandbox);
     if (!gen.ok) {
       log.error("tick: generate failed (sandbox preserved for inspection)", {
-        slug: idea.slug,
         sandbox: gen.sandbox.dir,
         failedPhase: gen.failedPhase,
         errors: gen.errors,
       });
-      // Best-effort: publish a failure log for ANY generate-phase failure.
-      // The model's actual chat-text output (what it "said" when it failed
-      // to write a file, etc.) is captured per-transcript in <label>.text.txt
-      // and surfaced at the top of each transcript block in the viewer.
-      if (gen.failedPhase) {
-        try {
-          log.phase("publish-failure-log");
-          await withDeadline(
-            "publish-failure-log",
-            120_000,
-            publishFailureLog({
-              idea,
-              sandboxDir: gen.sandbox.dir,
-              sandboxTranscriptsDir: gen.sandbox.transcriptsDir,
-              failedPhase: gen.failedPhase,
-              errors: gen.errors,
-              taskCount: gen.taskCount,
-              examplePick: gen.examplePick,
-            }),
-          );
-        } catch (err) {
-          log.warn("publish-failure-log: failed, continuing", { error: (err as Error).message });
-        }
+      try {
+        log.phase("publish-failure-log");
+        await withDeadline(
+          "publish-failure-log",
+          120_000,
+          publishFailureLog({
+            tempSlug,
+            sandboxDir: gen.sandbox.dir,
+            sandboxTranscriptsDir: gen.sandbox.transcriptsDir,
+            failedPhase: gen.failedPhase,
+            errors: gen.errors,
+            meta: gen.meta,
+          }),
+        );
+      } catch (err) {
+        log.warn("publish-failure-log: failed, continuing", { error: (err as Error).message });
       }
       return {
         ok: false,
-        error: `generate failed for ${idea.slug} at phase ${gen.failedPhase}: ${gen.errors.join("; ")}`,
+        error: `generate failed at phase ${gen.failedPhase}: ${gen.errors.join("; ")}`,
         durationMs: Date.now() - start,
       };
     }
@@ -107,7 +133,7 @@ export async function runOnce(): Promise<TickResult> {
         "publish",
         120_000,
         publishGame({
-          slug: idea.slug,
+          slug: gen.slug,
           meta: gen.meta,
           sandboxDir: gen.sandbox.dir,
           thumbnailPath,
@@ -125,7 +151,6 @@ export async function runOnce(): Promise<TickResult> {
           meta: gen.meta,
           liveUrl: pub.liveUrl,
           thumbnailUrl: pub.thumbnailUrl,
-          taskCount: gen.taskCount,
           durationMs: totalMs,
         }),
       );
@@ -134,12 +159,8 @@ export async function runOnce(): Promise<TickResult> {
     }
 
     await gen.sandbox.cleanup();
-    log.info("tick: success", {
-      slug: idea.slug,
-      durationMs: totalMs,
-      taskCount: gen.taskCount,
-    });
-    return { ok: true, slug: idea.slug, durationMs: totalMs };
+    log.info("tick: success", { slug: gen.slug, durationMs: totalMs });
+    return { ok: true, slug: gen.slug, durationMs: totalMs };
   } catch (err) {
     const e = err as Error;
     log.error("tick: unhandled error", { error: e.message, stack: e.stack });

@@ -1,33 +1,19 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createSandbox } from "../sandbox.ts";
-import { writeConventions } from "../conventions.ts";
 import { runOpenCode } from "../opencode.ts";
 import { log } from "../log.ts";
 
 const slug = `smoke-${Date.now()}`;
-const title = "Neon Dodger";
-const concept =
-  "A tiny game where the player controls a small triangle ship at the bottom of the canvas and dodges falling neon blocks with arrow keys. The blocks fall faster over time. Show a score that ticks up the longer you survive.";
-
 const sandbox = await createSandbox(slug);
 log.info("smoke-opencode: sandbox created", { dir: sandbox.dir });
 
-await writeConventions(sandbox.dir, slug);
-log.info("smoke-opencode: CONVENTIONS.md written");
+const prompt =
+  "Come up with a random game idea that is possible to create in a HTML canvas. " +
+  "Save the idea to a IDEA.md file in this working directory. " +
+  "The game should have a lose condition. Be concice.";
 
-const prompt = [
-  "Read the file CONVENTIONS.md in your working directory carefully before doing anything else.",
-  "",
-  "Then create the two required files (index.html and meta.json) for this game:",
-  "",
-  `Title: ${title}`,
-  `Concept: ${concept}`,
-  "",
-  "The game must follow CONVENTIONS.md exactly. Keep the implementation simple and robust.",
-].join("\n");
-
-const result = await runOpenCode({ sandboxDir: sandbox.dir, prompt });
+const result = await runOpenCode({ sandboxDir: sandbox.dir, prompt, variant: "high" });
 
 process.stdout.write(`\n=== opencode exit ${result.exitCode} (${result.durationMs}ms, timedOut=${result.timedOut}) ===\n`);
 process.stdout.write(`\n--- stdout (last 1000 chars) ---\n${result.stdout.slice(-1000)}\n`);
@@ -38,7 +24,7 @@ if (result.stderr.trim()) {
 const files = await readdir(sandbox.dir);
 process.stdout.write(`\n--- files in ${sandbox.dir} ---\n${files.join("\n")}\n`);
 
-for (const f of ["index.html", "meta.json"]) {
+for (const f of ["IDEA.md"]) {
   const p = join(sandbox.dir, f);
   try {
     const s = await stat(p);

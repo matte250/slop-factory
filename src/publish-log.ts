@@ -4,22 +4,21 @@ import { z } from "zod";
 import { loadConfig } from "./config.ts";
 import { gitOrThrow } from "./git-repo.ts";
 import { log } from "./log.ts";
-import type { GameIdea } from "./ideate.ts";
+import type { GameMeta } from "./games-index.ts";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type PublishFailureLogInput = {
-  idea: GameIdea;
+  /** Random tick identifier; used as the log slug prefix when no title exists yet. */
+  tempSlug: string;
   sandboxDir: string;
   sandboxTranscriptsDir: string;
   failedPhase: string;
   errors: string[];
-  /** Number of tasks if the tasks phase completed. */
-  taskCount?: number;
-  /** Reference example pick if the pick-example phase completed. */
-  examplePick?: { name: string; reason: string };
+  /** Set once extract-meta has succeeded. */
+  meta?: GameMeta;
 };
 
 export type PublishFailureLogResult = {
@@ -30,14 +29,11 @@ export type PublishFailureLogResult = {
 
 export const LogIndexEntrySchema = z.object({
   logSlug: z.string(),
-  slug: z.string(),
+  tempSlug: z.string(),
   title: z.string(),
-  concept: z.string(),
   failedPhase: z.string(),
   failedAt: z.string(),
   errorPreview: z.string(),
-  taskCount: z.number().optional(),
-  exampleName: z.string().optional(),
 });
 export type LogIndexEntry = z.infer<typeof LogIndexEntrySchema>;
 const LogIndexSchema = z.array(LogIndexEntrySchema);
@@ -53,59 +49,46 @@ export async function publishFailureLog(
 ): Promise<PublishFailureLogResult> {
   const cfg = loadConfig();
   const failedAt = new Date();
-  const logSlug = `${input.idea.slug}-${stamp(failedAt)}`;
+  const title = input.meta?.title ?? "(no title)";
+  const logSlug = `${input.tempSlug}-${stamp(failedAt)}`;
   const logDir = join(cfg.GAMES_REPO_PATH, "logs", logSlug);
 
   await mkdir(logDir, { recursive: true });
 
-  // 1. Copy whatever artefacts exist in the sandbox.
   const copied = await copyArtifacts(input.sandboxDir, logDir);
-
-  // 2. Copy transcripts (best-effort — directory may not exist on very early failures).
   const transcripts = await copyTranscripts(input.sandboxTranscriptsDir, logDir);
 
-  // 3. Write the structured failure summary.
   const failureJson = {
     logSlug,
-    slug: input.idea.slug,
-    title: input.idea.title,
-    concept: input.idea.concept,
+    tempSlug: input.tempSlug,
+    title,
     failedPhase: input.failedPhase,
     failedAt: failedAt.toISOString(),
     errors: input.errors,
-    taskCount: input.taskCount,
-    examplePick: input.examplePick,
+    meta: input.meta,
     artefacts: copied,
-    transcripts: transcripts,
+    transcripts,
   };
   await writeFile(join(logDir, "failure.json"), JSON.stringify(failureJson, null, 2) + "\n", "utf-8");
 
-  // 4. Generate the per-failure HTML viewer (self-contained). Lives at
-  //    index.html so navigating to logs/<slug>/ goes here by default; the
-  //    actual failed game (renamed to failed.html in copyArtifacts) is
-  //    linked from inside the viewer.
   const viewerHtml = await renderFailureViewer({
     failure: failureJson,
-    designContent: copied.includes("DESIGN.md") ? await readSafe(join(logDir, "DESIGN.md")) : null,
-    tasksContent: copied.includes("TASKS.md") ? await readSafe(join(logDir, "TASKS.md")) : null,
+    ideaContent: copied.includes("IDEA.md") ? await readSafe(join(logDir, "IDEA.md")) : null,
+    gameJsContent: copied.includes("game.js") ? await readSafe(join(logDir, "game.js")) : null,
+    metaJsonContent: copied.includes("META.json") ? await readSafe(join(logDir, "META.json")) : null,
     failedHtmlContent: copied.includes("failed.html") ? await readSafe(join(logDir, "failed.html")) : null,
-    metaJsonContent: copied.includes("meta.json") ? await readSafe(join(logDir, "meta.json")) : null,
     transcripts,
     transcriptsDir: join(logDir, "transcripts"),
   });
   await writeFile(join(logDir, "index.html"), viewerHtml, "utf-8");
 
-  // 5. Update logs-index.json (append entry, sort desc by failedAt, cap at N).
   const indexEntry: LogIndexEntry = {
     logSlug,
-    slug: input.idea.slug,
-    title: input.idea.title,
-    concept: input.idea.concept,
+    tempSlug: input.tempSlug,
+    title,
     failedPhase: input.failedPhase,
     failedAt: failedAt.toISOString(),
     errorPreview: input.errors[0]?.slice(0, 240) ?? "",
-    taskCount: input.taskCount,
-    exampleName: input.examplePick?.name,
   };
   const existing = await readLogsIndex(cfg.GAMES_REPO_PATH);
   const next = [indexEntry, ...existing.filter((e) => e.logSlug !== logSlug)]
@@ -117,7 +100,6 @@ export async function publishFailureLog(
     "utf-8",
   );
 
-  // 6. Generate the gallery (logs/index.html).
   await writeFile(
     join(cfg.GAMES_REPO_PATH, "logs", "index.html"),
     renderGallery(next),
@@ -126,7 +108,6 @@ export async function publishFailureLog(
 
   log.info("publish-log: files written", { logSlug, logDir });
 
-  // 7. Commit + push.
   await gitOrThrow(cfg.GAMES_REPO_PATH, ["add", `logs/`, "logs-index.json"]);
   const status = await gitOrThrow(cfg.GAMES_REPO_PATH, ["status", "--porcelain"]);
   if (!status.stdout.trim()) {
@@ -135,7 +116,7 @@ export async function publishFailureLog(
     await gitOrThrow(cfg.GAMES_REPO_PATH, [
       "commit",
       "-m",
-      `log: ${input.idea.title} (${logSlug}) failed at ${input.failedPhase}`,
+      `log: ${title} (${logSlug}) failed at ${input.failedPhase}`,
     ]);
   }
   await gitOrThrow(cfg.GAMES_REPO_PATH, ["push", "origin", "HEAD"]);
@@ -158,8 +139,9 @@ export async function publishFailureLog(
  * default — our viewer takes the `index.html` slot instead.
  */
 const ARTEFACT_FILES: { src: string; dst: string }[] = [
-  { src: "DESIGN.md", dst: "DESIGN.md" },
-  { src: "TASKS.md", dst: "TASKS.md" },
+  { src: "IDEA.md", dst: "IDEA.md" },
+  { src: "game.js", dst: "game.js" },
+  { src: "META.json", dst: "META.json" },
   { src: "index.html", dst: "failed.html" },
   { src: "meta.json", dst: "meta.json" },
 ];
@@ -184,9 +166,7 @@ type TranscriptEntry = {
   promptFile?: string;
   eventsFile?: string;
   summaryFile?: string;
-  /** Concatenated `text` events — what the model literally said in chat. */
   textFile?: string;
-  /** Concatenated `reasoning` events — the model's chain-of-thought. */
   reasoningFile?: string;
 };
 
@@ -204,13 +184,10 @@ async function copyTranscripts(
   if (entries.length === 0) return [];
   await mkdir(dst, { recursive: true });
 
-  // Group by label (the part before .prompt.txt / .events.jsonl / .summary.json / .text.txt).
   const byLabel = new Map<string, TranscriptEntry>();
   for (const name of entries) {
     let label: string | null = null;
     let kind: keyof TranscriptEntry | null = null;
-    // Order matters: ".text.txt" / ".reasoning.txt" must be checked before
-    // ".prompt.txt" since they all end in ".txt".
     if (name.endsWith(".reasoning.txt")) {
       label = name.slice(0, -".reasoning.txt".length);
       kind = "reasoningFile";
@@ -261,7 +238,6 @@ async function readLogsIndex(repoPath: string): Promise<LogIndexEntry[]> {
 }
 
 function stamp(d: Date): string {
-  // Compact ISO without separators for filesystem-safe timestamps.
   // 2026-05-10T12:34:56Z -> 20260510T123456Z
   return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 }
@@ -301,7 +277,7 @@ const SHARED_STYLE = `
   .meta-grid dt { color: #a5a5b8; }
   .meta-grid dd { margin: 0; color: #e6e6f0; word-break: break-word; }
   .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #1c2030; color: #7df9ff; border: 1px solid #2a2f44; }
-  .pill.fail-implement { background: #2a1015; color: #ff8c8c; border-color: #4a1d24; }
+  .pill.fail-implement, .pill.fail-extract-meta, .pill.fail-validate, .pill.fail-materialize, .pill.fail-ideate { background: #2a1015; color: #ff8c8c; border-color: #4a1d24; }
   .gallery-row { display: flex; gap: 16px; padding: 12px; border: 1px solid #1d1d2a; margin-bottom: 8px; align-items: baseline; flex-wrap: wrap; }
   .gallery-row a.title { color: #ff52ae; font-weight: 600; font-size: 16px; text-decoration: none; }
   .gallery-row .right { margin-left: auto; color: #a5a5b8; font-size: 12px; }
@@ -314,8 +290,6 @@ function renderGallery(entries: LogIndexEntry[]): string {
       <div class="gallery-row">
         <a class="title" href="${escapeHtml(e.logSlug)}/">${escapeHtml(e.title)}</a>
         <span class="pill fail-${escapeHtml(e.failedPhase)}">failed: ${escapeHtml(e.failedPhase)}</span>
-        ${e.taskCount != null ? `<span class="pill">${e.taskCount} tasks</span>` : ""}
-        ${e.exampleName ? `<span class="pill">example: ${escapeHtml(e.exampleName)}</span>` : ""}
         <span class="right">${escapeHtml(e.failedAt)}</span>
         <div class="preview">${escapeHtml(e.errorPreview || "(no error preview)")}</div>
       </div>`;
@@ -345,21 +319,19 @@ function renderGallery(entries: LogIndexEntry[]): string {
 type ViewerInput = {
   failure: {
     logSlug: string;
-    slug: string;
+    tempSlug: string;
     title: string;
-    concept: string;
     failedPhase: string;
     failedAt: string;
     errors: string[];
-    taskCount?: number;
-    examplePick?: { name: string; reason: string };
+    meta?: GameMeta;
     artefacts: string[];
     transcripts: TranscriptEntry[];
   };
-  designContent: string | null;
-  tasksContent: string | null;
-  failedHtmlContent: string | null;
+  ideaContent: string | null;
+  gameJsContent: string | null;
   metaJsonContent: string | null;
+  failedHtmlContent: string | null;
   transcripts: TranscriptEntry[];
   transcriptsDir: string;
 };
@@ -391,12 +363,10 @@ async function renderFailureViewer(v: ViewerInput): Promise<string> {
 <section>
   <h2>Summary</h2>
   <dl class="meta-grid">
-    <dt>Slug</dt><dd>${escapeHtml(f.slug)}</dd>
-    <dt>Concept</dt><dd>${escapeHtml(f.concept)}</dd>
+    <dt>Temp slug</dt><dd>${escapeHtml(f.tempSlug)}</dd>
     <dt>Failed at phase</dt><dd><span class="pill fail-${escapeHtml(f.failedPhase)}">${escapeHtml(f.failedPhase)}</span></dd>
     <dt>Failed at</dt><dd>${escapeHtml(f.failedAt)}</dd>
-    ${f.taskCount != null ? `<dt>Tasks planned</dt><dd>${f.taskCount}</dd>` : ""}
-    ${f.examplePick ? `<dt>Example chosen</dt><dd>${escapeHtml(f.examplePick.name)} — <em>${escapeHtml(f.examplePick.reason)}</em></dd>` : ""}
+    ${f.meta ? `<dt>Description</dt><dd>${escapeHtml(f.meta.description)}</dd>` : ""}
   </dl>
 </section>
 
@@ -405,23 +375,23 @@ async function renderFailureViewer(v: ViewerInput): Promise<string> {
   ${errorsHtml}
 </section>
 
-${v.designContent ? `<section>
-  <h2>DESIGN.md</h2>
-  <details><summary>show</summary><pre>${escapeHtml(v.designContent)}</pre></details>
+${v.ideaContent ? `<section>
+  <h2>IDEA.md</h2>
+  <details open><summary>show</summary><pre>${escapeHtml(v.ideaContent)}</pre></details>
 </section>` : ""}
 
-${v.tasksContent ? `<section>
-  <h2>TASKS.md</h2>
-  <details open><summary>show</summary><pre>${escapeHtml(v.tasksContent)}</pre></details>
+${v.gameJsContent ? `<section>
+  <h2>game.js</h2>
+  <details><summary>show source (${v.gameJsContent.length.toLocaleString()} chars)</summary><pre>${escapeHtml(v.gameJsContent)}</pre></details>
 </section>` : ""}
 
 ${v.metaJsonContent ? `<section>
-  <h2>meta.json</h2>
+  <h2>META.json</h2>
   <details><summary>show</summary><pre>${escapeHtml(v.metaJsonContent)}</pre></details>
 </section>` : ""}
 
 ${v.failedHtmlContent ? `<section>
-  <h2>index.html (partial — failed before final validation passed)</h2>
+  <h2>index.html (rendered — failed validation)</h2>
   <p><a href="failed.html">▶ open the broken game in a new tab</a> — may crash or behave incorrectly.</p>
   <details><summary>show source (${v.failedHtmlContent.length.toLocaleString()} chars)</summary><pre>${escapeHtml(v.failedHtmlContent)}</pre></details>
 </section>` : ""}

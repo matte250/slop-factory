@@ -8,7 +8,6 @@ await notifyDiscord({
   },
   liveUrl: "https://matte250.github.io/slop-factory-site",
   thumbnailUrl: "https://matte250.github.io/slop-factory-site/games/gravity-flip/thumbnail.png",
-  taskCount: 12,
   durationMs: 12345,
 });
 
