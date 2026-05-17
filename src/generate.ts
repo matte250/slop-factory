@@ -135,7 +135,9 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function runImplement(sandbox: Sandbox): Promise<{ ok: boolean; errors: string[] }> {
+async function runImplement(
+  sandbox: Sandbox,
+): Promise<{ ok: boolean; errors: string[]; sessionId?: string }> {
   let sessionId: string | undefined = undefined;
 
   for (let attempt = 1; attempt <= IMPLEMENT_MAX_ATTEMPTS; attempt++) {
@@ -169,7 +171,7 @@ async function runImplement(sandbox: Sandbox): Promise<{ ok: boolean; errors: st
 
     if (await fileExists(join(sandbox.dir, "game.js"))) {
       if (attempt > 1) log.info("implement: recovered on retry", { attempt });
-      return { ok: true, errors: [] };
+      return { ok: true, errors: [], sessionId };
     }
     log.warn("implement: attempt failed", { attempt, reason: "game.js not created" });
   }
@@ -177,7 +179,22 @@ async function runImplement(sandbox: Sandbox): Promise<{ ok: boolean; errors: st
   return {
     ok: false,
     errors: [`implement: game.js was not created after ${IMPLEMENT_MAX_ATTEMPTS} attempts`],
+    sessionId,
   };
+}
+
+async function runImproveGraphics(sandbox: Sandbox, sessionId: string | undefined): Promise<void> {
+  // Resumes the implement session so the model already has the game in
+  // context. Failures here are non-fatal — if the pass breaks game.js the
+  // validate-fix loop downstream will surface it.
+  await runOpenCode({
+    sandboxDir: sandbox.dir,
+    prompt: "Improve the graphics of the game.",
+    sessionId,
+    variant: "medium",
+    transcriptDir: sandbox.transcriptsDir,
+    transcriptLabel: "improve-graphics",
+  });
 }
 
 /**
@@ -299,6 +316,10 @@ export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<Ge
   if (!impl.ok) {
     return { ok: false, sandbox, errors: impl.errors, failedPhase: "implement" };
   }
+
+  // ---- Phase: improve-graphics ----
+  log.phase("improve-graphics");
+  await runImproveGraphics(sandbox, impl.sessionId);
 
   // ---- Phase: extract-meta ----
   // The extracted META.json gives us description + controls. We override
