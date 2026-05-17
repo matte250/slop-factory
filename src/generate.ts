@@ -183,11 +183,14 @@ async function runImplement(
   };
 }
 
-async function runImproveGraphics(sandbox: Sandbox, sessionId: string | undefined): Promise<void> {
+async function runImproveGraphics(
+  sandbox: Sandbox,
+  sessionId: string | undefined,
+): Promise<string | undefined> {
   // Resumes the implement session so the model already has the game in
   // context. Failures here are non-fatal — if the pass breaks game.js the
   // validate-fix loop downstream will surface it.
-  await runOpenCode({
+  const oc = await runOpenCode({
     sandboxDir: sandbox.dir,
     prompt: "Improve the graphics of the game.",
     sessionId,
@@ -195,6 +198,24 @@ async function runImproveGraphics(sandbox: Sandbox, sessionId: string | undefine
     transcriptDir: sandbox.transcriptsDir,
     transcriptLabel: "improve-graphics",
   });
+  return oc.sessionId ?? sessionId;
+}
+
+async function runAddSounds(
+  sandbox: Sandbox,
+  sessionId: string | undefined,
+): Promise<string | undefined> {
+  // Same-session pass on top of improve-graphics. Non-fatal for the same
+  // reason — any breakage shows up in the validate-fix loop.
+  const oc = await runOpenCode({
+    sandboxDir: sandbox.dir,
+    prompt: "Add sounds to the game.",
+    sessionId,
+    variant: "medium",
+    transcriptDir: sandbox.transcriptsDir,
+    transcriptLabel: "add-sounds",
+  });
+  return oc.sessionId ?? sessionId;
 }
 
 /**
@@ -319,7 +340,11 @@ export async function generateGame(sandbox: Sandbox, idea: GameIdea): Promise<Ge
 
   // ---- Phase: improve-graphics ----
   log.phase("improve-graphics");
-  await runImproveGraphics(sandbox, impl.sessionId);
+  const afterGraphicsSession = await runImproveGraphics(sandbox, impl.sessionId);
+
+  // ---- Phase: add-sounds ----
+  log.phase("add-sounds");
+  await runAddSounds(sandbox, afterGraphicsSession);
 
   // ---- Phase: extract-meta ----
   // The extracted META.json gives us description + controls. We override
